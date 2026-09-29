@@ -244,30 +244,40 @@ function enmascararId(id) {
 }
 
 /**
- * Limpia la vista y guarda el ID del registro mas reciente como marca de agua.
- * El polling solo mostrara registros con un ID superior (nuevos escaneos RFID).
+ * Elimina PERMANENTEMENTE todos los registros de la base de datos
+ * via DELETE /api/registros y limpia la vista.
  */
 function limpiarRegistros() {
-    // Tomar el ID mas alto de los registros actualmente visibles
-    const filas = document.querySelectorAll('#tabla-registros tr');
-    let maxId = clearId; // partir del clearId actual, no de 0
-    filas.forEach(fila => {
-        const idAttr = parseInt(fila.dataset.recordId || '0');
-        if (idAttr > maxId) maxId = idAttr;
+    const btn = document.getElementById('btn-limpiar');
+    if (btn) btn.disabled = true;
+
+    fetch(API_BASE + '/api/registros', { method: 'DELETE' })
+    .then(res => res.json().then(data => ({ status: res.status, data })))
+    .then(({ status, data }) => {
+        if (status === 200) {
+            // Limpiar UI completamente
+            clearId = 0;
+            historialCompleto = [];
+            document.getElementById('tabla-registros').innerHTML = '';
+            document.getElementById('sin-registros').style.display = 'flex';
+            document.getElementById('aforo').innerText    = '0';
+            document.getElementById('ingresos').innerText = '0';
+            document.getElementById('alertas').innerText  = '0';
+            document.getElementById('table-count').textContent = '0 registros';
+            actualizarBarraAforo(0);
+            actualizarBadgeAlertas(0);
+            mostrarToast('Todos los registros eliminados de la base de datos.', 'ok');
+        } else {
+            mostrarToast(data.error || 'Error al eliminar registros.', 'danger');
+        }
+    })
+    .catch(err => {
+        mostrarToast('Error de conexion al eliminar.', 'danger');
+        console.error('Error eliminando registros:', err);
+    })
+    .finally(() => {
+        if (btn) btn.disabled = false;
     });
-
-    // Si no hay filas pero el historial tiene datos, usar el id del historial
-    if (maxId === clearId && historialCompleto.length > 0) {
-        const ids = historialCompleto.map(r => r.dbId || 0);
-        maxId = Math.max(...ids, clearId);
-    }
-
-    clearId = maxId;
-    historialCompleto = [];
-    document.getElementById('tabla-registros').innerHTML = '';
-    document.getElementById('sin-registros').style.display = 'flex';
-    document.getElementById('table-count').textContent = '0 registros';
-    mostrarToast('Registros limpiados. Aparecen solo los nuevos ingresos.', 'ok');
 }
 
 /** Actualiza visualmente la barra de aforo */

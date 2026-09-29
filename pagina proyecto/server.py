@@ -7,6 +7,15 @@ import mysql.connector
 app = Flask(__name__)
 CORS(app)  # Permite peticiones desde la interfaz web y dispositivos externos (como el ESP32)
 
+# Buscar certificado SSL del sistema (necesario para TiDB Cloud en Render)
+ssl_ca_path = '/etc/ssl/certs/ca-certificates.crt'
+if not os.path.exists(ssl_ca_path):
+    try:
+        import certifi
+        ssl_ca_path = certifi.where()
+    except ImportError:
+        ssl_ca_path = None
+
 # Configuración de conexión a la base de datos MySQL en la nube (TiDB Cloud)
 db_config = {
     'host': os.getenv('DB_HOST', 'gateway01.us-east-1.prod.aws.tidbcloud.com'),
@@ -14,9 +23,12 @@ db_config = {
     'password': os.getenv('DB_PASSWORD', 'mJEr6FSHWRrehWlw'),
     'database': os.getenv('DB_NAME', 'fet_rfid'),
     'port': int(os.getenv('DB_PORT', 4000)),
-    'ssl_disabled': False,     # Forzar cifrado SSL/TLS requerido por TiDB Cloud
-    'ssl_verify_cert': False   # Permitir handshake SSL en el servidor de Render
 }
+
+# Activar SSL/TLS si existe la ruta de certificados
+if ssl_ca_path:
+    db_config['ssl_ca'] = ssl_ca_path
+    db_config['ssl_verify_cert'] = True
 
 def get_db_connection():
     return mysql.connector.connect(**db_config)

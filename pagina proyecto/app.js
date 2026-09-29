@@ -14,7 +14,8 @@ let puertoActual      = 'COM3';
 let historialCompleto = [];
 let pollingInterval   = null;
 let ultimoRegistroId  = 0;
-let monitorPausado    = false; // true cuando el usuario pulsa "Limpiar"
+let monitorPausado    = false;
+let clearTimestamp    = null; // marca de agua: solo mostrar registros posteriores a este momento
 
 // ============================================================
 //  LOGIN / LOGOUT
@@ -95,6 +96,7 @@ function salirSistema() {
         pollingInterval = null;
     }
     monitorPausado = false; // resetear pausa al cerrar sesion
+    clearTimestamp = null;  // resetear marca de agua al cerrar sesion
     document.getElementById('app-layout').style.display = 'none';
     const loginScreen = document.getElementById('login-screen');
     loginScreen.style.display  = 'flex';
@@ -176,16 +178,24 @@ function cargarEstadisticas() {
 
 /**
  * Consulta GET /api/ultimos-registros para llenar la tabla de monitoreo.
- * Se omite si el monitor esta pausado por el usuario.
+ * Solo muestra registros posteriores al clearTimestamp (si existe).
  */
 function cargarUltimosRegistros() {
-    if (monitorPausado) return; // respetar pausa del usuario
+    if (monitorPausado) return;
     fetch(API_BASE + '/api/ultimos-registros')
     .then(res => res.json())
     .then(registros => {
         const tabla  = document.getElementById('tabla-registros');
         const sinReg = document.getElementById('sin-registros');
         const contEl = document.getElementById('table-count');
+
+        // Filtrar solo registros posteriores al ultimo limpiar
+        if (clearTimestamp && registros) {
+            registros = registros.filter(reg => {
+                if (!reg.fecha_hora) return false;
+                return new Date(reg.fecha_hora.replace(' ', 'T')) > clearTimestamp;
+            });
+        }
 
         if (!registros || registros.length === 0) {
             tabla.innerHTML = '';
@@ -199,7 +209,6 @@ function cargarUltimosRegistros() {
 
         tabla.innerHTML = '';
         registros.forEach(reg => {
-            // Enmascarar ID — Habeas Data
             const idEnmascarado = enmascararId(reg.idEstudiante || reg.documento || '0000');
             const badgeClass = reg.estado === 'AUTORIZADO' ? 'badge ok' : 'badge warn';
             const hora = reg.fecha_hora || '';
@@ -237,48 +246,16 @@ function enmascararId(id) {
 }
 
 /**
- * Limpia la vista de la tabla Y pausa el polling.
- * Pulsando de nuevo "Reanudar" retoma el monitoreo en vivo.
+ * Limpia la vista y establece una marca de agua.
+ * El polling solo mostrara registros que lleguen DESPUES de este momento.
  */
 function limpiarRegistros() {
-    const btn = document.getElementById('btn-limpiar');
-
-    if (!monitorPausado) {
-        // ── PAUSAR y limpiar ──
-        monitorPausado = true;
-        document.getElementById('tabla-registros').innerHTML = '';
-        document.getElementById('sin-registros').style.display = 'flex';
-        document.getElementById('aforo').innerText    = '0';
-        document.getElementById('ingresos').innerText = '0';
-        document.getElementById('alertas').innerText  = '0';
-        document.getElementById('table-count').textContent = '0 registros';
-        actualizarBarraAforo(0);
-        actualizarBadgeAlertas(0);
-        historialCompleto = [];
-        // Cambiar boton a "Reanudar"
-        if (btn) {
-            btn.innerHTML = `
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                Reanudar
-            `;
-            btn.title = 'Reanudar monitoreo en vivo';
-        }
-        mostrarToast('Monitoreo pausado. Pulse Reanudar para continuar.', 'ok');
-    } else {
-        // ── REANUDAR ──
-        monitorPausado = false;
-        cargarEstadisticas();
-        cargarUltimosRegistros();
-        // Restaurar boton
-        if (btn) {
-            btn.innerHTML = `
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                Limpiar
-            `;
-            btn.title = 'Limpiar registros de la vista';
-        }
-        mostrarToast('Monitoreo reanudado.', 'ok');
-    }
+    clearTimestamp = new Date();           // marca de agua = ahora
+    historialCompleto = [];
+    document.getElementById('tabla-registros').innerHTML = '';
+    document.getElementById('sin-registros').style.display = 'flex';
+    document.getElementById('table-count').textContent = '0 registros';
+    mostrarToast('Registros limpiados. Se mostraran solo los nuevos ingresos.', 'ok');
 }
 
 /** Actualiza visualmente la barra de aforo */

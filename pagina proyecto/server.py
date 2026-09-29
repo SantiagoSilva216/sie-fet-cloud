@@ -222,7 +222,24 @@ def login():
         return jsonify({'error': str(err)}), 500
 
 
+# 8. ENDPOINT PARA ELIMINAR TODOS LOS REGISTROS DE ACCESO
+@app.route('/api/registros', methods=['DELETE'])
+def eliminar_registros():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM registros_acceso")
+        filas_eliminadas = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({'mensaje': f'{filas_eliminadas} registros eliminados correctamente'}), 200
+    except mysql.connector.Error as err:
+        return jsonify({'error': str(err)}), 500
+
+
 if __name__ == '__main__':
+
     port = int(os.environ.get('PORT', 5000))
     # debug=False en produccion (Render)
     app.run(host='0.0.0.0', port=port, debug=os.environ.get('FLASK_DEBUG', 'false').lower() == 'true')

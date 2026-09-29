@@ -86,7 +86,8 @@ def ultimos_registros():
     cursor = conn.cursor(dictionary=True)
 
     query = """
-        SELECT DATE_FORMAT(r.fecha_hora, '%Y-%m-%d %H:%i:%s') AS fecha_hora, 
+        SELECT r.id,
+               DATE_FORMAT(r.fecha_hora, '%Y-%m-%d %H:%i:%s') AS fecha_hora, 
                r.rfid_tag, 
                r.estado, 
                COALESCE(e.documento, '0000') AS idEstudiante

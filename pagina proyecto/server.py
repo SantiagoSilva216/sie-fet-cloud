@@ -13,7 +13,9 @@ db_config = {
     'user': os.getenv('DB_USER', '2SxF8EWuPc2rfLd.root'),
     'password': os.getenv('DB_PASSWORD', 'mJEr6FSHWRrehWlw'),
     'database': os.getenv('DB_NAME', 'fet_rfid'),
-    'port': int(os.getenv('DB_PORT', 4000))
+    'port': int(os.getenv('DB_PORT', 4000)),
+    'ssl_disabled': False,     # Forzar cifrado SSL/TLS requerido por TiDB Cloud
+    'ssl_verify_cert': False   # Permitir handshake SSL en el servidor de Render
 }
 
 def get_db_connection():

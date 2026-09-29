@@ -13,9 +13,8 @@ let aforoMaximo       = 150;
 let puertoActual      = 'COM3';
 let historialCompleto = [];
 let pollingInterval   = null;
-let ultimoRegistroId  = 0;
 let monitorPausado    = false;
-let clearTimestamp    = null; // marca de agua: solo mostrar registros posteriores a este momento
+let clearId           = 0; // ID del ultimo registro al momento de limpiar (marca de agua)
 
 // ============================================================
 //  LOGIN / LOGOUT
@@ -95,8 +94,8 @@ function salirSistema() {
         clearInterval(pollingInterval);
         pollingInterval = null;
     }
-    monitorPausado = false; // resetear pausa al cerrar sesion
-    clearTimestamp = null;  // resetear marca de agua al cerrar sesion
+    monitorPausado = false;
+    clearId        = 0;  // resetear marca de agua al cerrar sesion
     document.getElementById('app-layout').style.display = 'none';
     const loginScreen = document.getElementById('login-screen');
     loginScreen.style.display  = 'flex';
@@ -189,12 +188,9 @@ function cargarUltimosRegistros() {
         const sinReg = document.getElementById('sin-registros');
         const contEl = document.getElementById('table-count');
 
-        // Filtrar solo registros posteriores al ultimo limpiar
-        if (clearTimestamp && registros) {
-            registros = registros.filter(reg => {
-                if (!reg.fecha_hora) return false;
-                return new Date(reg.fecha_hora.replace(' ', 'T')) > clearTimestamp;
-            });
+        // Filtrar: solo mostrar registros con id > clearId (marca de agua)
+        if (clearId > 0) {
+            registros = registros.filter(reg => (reg.id || 0) > clearId);
         }
 
         if (!registros || registros.length === 0) {
@@ -215,6 +211,7 @@ function cargarUltimosRegistros() {
 
             const tr = document.createElement('tr');
             tr.className = 'new-row';
+            tr.dataset.recordId = reg.id || 0;  // guardar ID para la marca de agua
             tr.innerHTML = `
                 <td style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:.85rem;">${hora}</td>
                 <td style="font-family:'JetBrains Mono',monospace;letter-spacing:1px;color:var(--text-sub);">${idEnmascarado}</td>
@@ -224,8 +221,9 @@ function cargarUltimosRegistros() {
             tabla.appendChild(tr);
         });
 
-        // Actualizar historial para reportes
+        // Actualizar historial para reportes (incluye dbId para la marca de agua)
         historialCompleto = registros.map(r => ({
+            dbId: r.id || 0,
             hora: r.fecha_hora || '',
             id: r.idEstudiante || r.documento || '0000',
             tag: r.rfid_tag || '',
@@ -246,16 +244,30 @@ function enmascararId(id) {
 }
 
 /**
- * Limpia la vista y establece una marca de agua.
- * El polling solo mostrara registros que lleguen DESPUES de este momento.
+ * Limpia la vista y guarda el ID del registro mas reciente como marca de agua.
+ * El polling solo mostrara registros con un ID superior (nuevos escaneos RFID).
  */
 function limpiarRegistros() {
-    clearTimestamp = new Date();           // marca de agua = ahora
+    // Tomar el ID mas alto de los registros actualmente visibles
+    const filas = document.querySelectorAll('#tabla-registros tr');
+    let maxId = clearId; // partir del clearId actual, no de 0
+    filas.forEach(fila => {
+        const idAttr = parseInt(fila.dataset.recordId || '0');
+        if (idAttr > maxId) maxId = idAttr;
+    });
+
+    // Si no hay filas pero el historial tiene datos, usar el id del historial
+    if (maxId === clearId && historialCompleto.length > 0) {
+        const ids = historialCompleto.map(r => r.dbId || 0);
+        maxId = Math.max(...ids, clearId);
+    }
+
+    clearId = maxId;
     historialCompleto = [];
     document.getElementById('tabla-registros').innerHTML = '';
     document.getElementById('sin-registros').style.display = 'flex';
     document.getElementById('table-count').textContent = '0 registros';
-    mostrarToast('Registros limpiados. Se mostraran solo los nuevos ingresos.', 'ok');
+    mostrarToast('Registros limpiados. Aparecen solo los nuevos ingresos.', 'ok');
 }
 
 /** Actualiza visualmente la barra de aforo */

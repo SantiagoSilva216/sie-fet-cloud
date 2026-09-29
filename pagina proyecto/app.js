@@ -1,38 +1,60 @@
 // ============================================================
-//  app.js  –  Integración con Backend Flask (FET S.I.E)
+//  app.js  –  Logica del Sistema S.I.E - FET
+//  Conectado al backend Flask (server.py)
+//  Autores: Ordonez, Cardoso, Serrato — FET 2026
+//  Licencia Privativa
 // ============================================================
 
-const API_URL = 'https://sistema-fet-backend.onrender.com/api';
-const CREDENCIALES = { usuario: 'admin', clave: '1234' };
+// ── URL del backend en Render (TiDB Cloud + Flask) ──
+const API_BASE = 'https://sistema-fet-backend.onrender.com';
 
-let aforoMaximo = 150;
-let puertoActual = 'COM3';
-let monitorInterval = null;
+// ── Estado global ──
+let aforoMaximo   = 150;
+let puertoActual  = 'COM3';
+let historialCompleto = [];
+let pollingInterval   = null;
+let ultimoRegistroId  = 0; // para detectar registros nuevos
 
 // ============================================================
 //  LOGIN / LOGOUT
 // ============================================================
 
-async function entrarSistema(e) {
+/**
+ * Autentica contra el endpoint POST /api/login
+ * que valida usuario + clave con hash SHA-256 en MySQL.
+ */
+function entrarSistema(e) {
     e.preventDefault();
     const usuario = document.getElementById('input-usuario').value.trim();
     const clave   = document.getElementById('input-clave').value;
+    const btn     = document.getElementById('btn-login');
 
     if (!usuario || !clave) {
-        mostrarToast('Ingrese usuario y clave de acceso.', 'danger');
+        mostrarToast('Complete ambos campos.', 'danger');
         return;
     }
 
-    try {
-        const response = await fetch(`${API_URL}/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ usuario, clave })
-        });
+    // Animacion de carga
+    btn.disabled = true;
+    btn.querySelector('.btn-text').textContent = 'Verificando...';
 
-        if (response.ok) {
-            const data = await response.json();
-            mostrarToast(`Bienvenido, ${data.usuario}`, 'ok');
+    fetch(API_BASE + '/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuario: usuario, clave: clave })
+    })
+    .then(res => res.json().then(data => ({ status: res.status, data })))
+    .then(({ status, data }) => {
+        if (status === 200 && data.usuario) {
+            // Login exitoso
+            const nombreSidebar = document.getElementById('sidebar-username');
+            if (nombreSidebar) {
+                nombreSidebar.textContent = data.usuario.charAt(0).toUpperCase() + data.usuario.slice(1);
+            }
+            const rolEl = document.querySelector('.user-role');
+            if (rolEl && data.rol) {
+                rolEl.textContent = data.rol;
+            }
 
             const loginScreen = document.getElementById('login-screen');
             loginScreen.style.opacity = '0';
@@ -40,299 +62,472 @@ async function entrarSistema(e) {
                 loginScreen.style.display = 'none';
                 document.getElementById('app-layout').style.display = 'flex';
                 iniciarMonitor();
-            }, 800);
+            }, 700);
         } else {
-            const errData = await response.json();
-            mostrarToast(errData.error || 'Credenciales incorrectas.', 'danger');
+            // Login fallido
+            btn.disabled = false;
+            btn.querySelector('.btn-text').textContent = 'Iniciar Sesion';
+            mostrarToast(data.error || 'Credenciales incorrectas.', 'danger');
+            shakeLogin();
         }
-    } catch (error) {
-        mostrarToast('Error al conectar con el servidor de autenticación.', 'danger');
-    }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.querySelector('.btn-text').textContent = 'Iniciar Sesion';
+        mostrarToast('Error de conexion con el servidor.', 'danger');
+        shakeLogin();
+        console.error('Login error:', err);
+    });
+}
+
+function shakeLogin() {
+    const box = document.querySelector('.login-box');
+    box.style.animation = 'none';
+    void box.offsetWidth;
+    box.style.animation = 'shake 0.4s ease';
 }
 
 function salirSistema() {
-    if (monitorInterval) clearInterval(monitorInterval);
+    // Detener polling
+    if (pollingInterval) {
+        clearInterval(pollingInterval);
+        pollingInterval = null;
+    }
     document.getElementById('app-layout').style.display = 'none';
     const loginScreen = document.getElementById('login-screen');
-    loginScreen.style.display = 'flex';
-    loginScreen.style.opacity = '0';
+    loginScreen.style.display  = 'flex';
+    loginScreen.style.opacity  = '0';
     document.getElementById('input-usuario').value = '';
-    document.getElementById('input-clave').value = '';
-    setTimeout(() => loginScreen.style.opacity = '1', 50);
-    mostrarToast('Sesión cerrada correctamente.', 'ok');
+    document.getElementById('input-clave').value   = '';
+    document.getElementById('btn-login').disabled  = false;
+    document.getElementById('btn-login').querySelector('.btn-text').textContent = 'Iniciar Sesion';
+    setTimeout(() => { loginScreen.style.opacity = '1'; }, 50);
+    mostrarToast('Sesion cerrada correctamente.', 'ok');
 }
 
 // ============================================================
-//  NAVEGACIÓN ENTRE VISTAS
+//  NAVEGACION ENTRE VISTAS
 // ============================================================
 
 function cambiarVista(idVista, btnElement) {
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.nav-btn').forEach(b => {
+        b.classList.remove('active');
+        b.removeAttribute('aria-current');
+    });
     document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
     btnElement.classList.add('active');
+    btnElement.setAttribute('aria-current', 'page');
     document.getElementById('vista-' + idVista).classList.add('active');
 
-    if (idVista === 'estudiantes') cargarEstudiantes();
-    if (idVista === 'reportes') cargarReportesHistorial();
+    if (idVista === 'reportes') sincronizarReportes();
+    if (idVista === 'estudiantes') cargarEstudiantesDesdeAPI();
 }
 
 // ============================================================
-//  MONITOREO EN VIVO (POLLING A FLASK)
+//  MONITOREO EN VIVO — con polling al backend
 // ============================================================
 
 function iniciarMonitor() {
+    historialCompleto = [];
     actualizarEstadoPuerto();
-    obtenerMetricasYRegistros();
-    
-    // Consulta periódica cada 2 segundos
-    if (monitorInterval) clearInterval(monitorInterval);
-    monitorInterval = setInterval(obtenerMetricasYRegistros, 2000);
+
+    // Cargar datos iniciales desde el backend
+    cargarEstadisticas();
+    cargarUltimosRegistros();
+
+    // Polling cada 3 segundos para datos en tiempo real
+    if (pollingInterval) clearInterval(pollingInterval);
+    pollingInterval = setInterval(() => {
+        cargarEstadisticas();
+        cargarUltimosRegistros();
+    }, 3000);
 }
 
-async function obtenerMetricasYRegistros() {
-    try {
-        // 1. Obtener Métricas
-        const resStats = await fetch(`${API_URL}/stats`);
-        if (resStats.ok) {
-            const stats = await resStats.json();
-            document.getElementById('aforo').innerText = stats.aforo;
-            document.getElementById('ingresos').innerText = stats.ingresos;
-            document.getElementById('alertas').innerText = stats.alertas;
+/**
+ * Consulta GET /api/stats para obtener aforo, ingresos y alertas
+ */
+function cargarEstadisticas() {
+    fetch(API_BASE + '/api/stats')
+    .then(res => res.json())
+    .then(data => {
+        const aforoEl   = document.getElementById('aforo');
+        const ingresosEl = document.getElementById('ingresos');
+        const alertasEl  = document.getElementById('alertas');
+
+        const aforoAnterior = parseInt(aforoEl.innerText.replace(/,/g, '')) || 0;
+
+        aforoEl.innerText    = (data.aforo || 0).toLocaleString();
+        ingresosEl.innerText = (data.ingresos || 0).toLocaleString();
+        alertasEl.innerText  = (data.alertas || 0).toLocaleString();
+
+        // Animar si cambio
+        if (data.aforo !== aforoAnterior) {
+            animarContador(aforoEl);
+            animarContador(ingresosEl);
         }
 
-        // 2. Obtener ÚLtimos 5 Registros
-        const resReg = await fetch(`${API_URL}/ultimos-registros`);
-        if (resReg.ok) {
-            const registros = await resReg.json();
-            renderizarTablaMonitoreo(registros);
-        }
-    } catch (error) {
-        console.error('Error al obtener datos en vivo:', error);
-    }
+        actualizarBarraAforo(data.aforo || 0);
+        actualizarBadgeAlertas(data.alertas || 0);
+    })
+    .catch(err => console.error('Error cargando stats:', err));
 }
 
-function renderizarTablaMonitoreo(registros) {
-    const tabla = document.getElementById('tabla-registros');
-    const sinReg = document.getElementById('sin-registros');
+/**
+ * Consulta GET /api/ultimos-registros para llenar la tabla de monitoreo
+ */
+function cargarUltimosRegistros() {
+    fetch(API_BASE + '/api/ultimos-registros')
+    .then(res => res.json())
+    .then(registros => {
+        const tabla  = document.getElementById('tabla-registros');
+        const sinReg = document.getElementById('sin-registros');
+        const contEl = document.getElementById('table-count');
 
-    if (registros.length === 0) {
-        sinReg.style.display = 'block';
+        if (!registros || registros.length === 0) {
+            tabla.innerHTML = '';
+            sinReg.style.display = 'flex';
+            contEl.textContent = '0 registros';
+            return;
+        }
+
+        sinReg.style.display = 'none';
+        contEl.textContent = `${registros.length} registro${registros.length !== 1 ? 's' : ''}`;
+
         tabla.innerHTML = '';
-        return;
-    }
+        registros.forEach(reg => {
+            // Enmascarar ID — Habeas Data
+            const idEnmascarado = enmascararId(reg.idEstudiante || reg.documento || '0000');
+            const badgeClass = reg.estado === 'AUTORIZADO' ? 'badge ok' : 'badge warn';
+            const hora = reg.fecha_hora || '';
 
-    sinReg.style.display = 'none';
-    tabla.innerHTML = registros.map(reg => {
-        const badgeClass = reg.estado === 'AUTORIZADO' ? 'badge ok' : 'badge warn';
-        return `
-            <tr>
-                <td style="color: var(--text-muted);">${reg.fecha_hora}</td>
-                <td>***${reg.idEstudiante}</td>
-                <td class="rfid-tag">${reg.rfid_tag}</td>
+            const tr = document.createElement('tr');
+            tr.className = 'new-row';
+            tr.innerHTML = `
+                <td style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:.85rem;">${hora}</td>
+                <td style="font-family:'JetBrains Mono',monospace;letter-spacing:1px;color:var(--text-sub);">${idEnmascarado}</td>
+                <td class="rfid-tag">${reg.rfid_tag || ''}</td>
                 <td><span class="${badgeClass}">${reg.estado}</span></td>
-            </tr>
-        `;
-    }).join('');
+            `;
+            tabla.appendChild(tr);
+        });
+
+        // Actualizar historial para reportes
+        historialCompleto = registros.map(r => ({
+            hora: r.fecha_hora || '',
+            id: r.idEstudiante || r.documento || '0000',
+            tag: r.rfid_tag || '',
+            estado: r.estado || ''
+        }));
+    })
+    .catch(err => console.error('Error cargando registros:', err));
+}
+
+/**
+ * Enmascara un ID estudiantil segun Ley 1581/2012 Habeas Data
+ * Ej: "1075854589" → "***4589"
+ */
+function enmascararId(id) {
+    const s = String(id);
+    if (s.length <= 4) return '***' + s;
+    return '***' + s.slice(-4);
 }
 
 function limpiarRegistros() {
     document.getElementById('tabla-registros').innerHTML = '';
-    document.getElementById('sin-registros').style.display = 'block';
-    mostrarToast('Vista de monitor despejada.', 'ok');
+    document.getElementById('sin-registros').style.display = 'flex';
+    document.getElementById('table-count').textContent = '0 registros';
+    historialCompleto = [];
+    mostrarToast('Vista de registros limpiada.', 'ok');
 }
 
-function actualizarEstadoPuerto() {
-    document.getElementById('estado-puerto').textContent = `Escuchando puerto ${puertoActual}...`;
+/** Actualiza visualmente la barra de aforo */
+function actualizarBarraAforo(actual) {
+    const pct = Math.min((actual / aforoMaximo) * 100, 100);
+    const bar = document.getElementById('aforo-bar');
+    if (bar) {
+        bar.style.width = pct + '%';
+        bar.style.background = 'linear-gradient(to right, #1f6e1f, #5cc45c)';
+    }
+    const lbl = document.getElementById('aforo-max-label');
+    if (lbl) lbl.textContent = aforoMaximo;
 }
 
-// ============================================================
-//  GESTIÓN DE ESTUDIANTES (MYSQL)
-// ============================================================
-
-async function cargarEstudiantes() {
-    try {
-        const response = await fetch(`${API_URL}/estudiantes`);
-        const estudiantes = await response.json();
-        const tbody = document.getElementById('tabla-estudiantes');
-
-        tbody.innerHTML = estudiantes.map(est => {
-            const esActivo = est.estado === 'ACTIVO';
-            const badgeClass = esActivo ? 'badge ok' : 'badge warn';
-            const btnTexto = esActivo ? 'Suspender' : 'Reactivar';
-            const nuevoEstado = esActivo ? 'INACTIVO' : 'ACTIVO';
-
-            return `
-                <tr>
-                    <td>${est.nombre}</td>
-                    <td>${est.carrera}</td>
-                    <td class="rfid-tag">${est.rfid_tag}</td>
-                    <td><span class="${badgeClass}">${est.estado}</span></td>
-                    <td>
-                        <button class="btn-table-action" onclick="toggleEstado('${est.rfid_tag}', '${nuevoEstado}')">
-                            ${btnTexto}
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
-    } catch (error) {
-        mostrarToast('Error al cargar la lista de estudiantes.', 'danger');
+/** Actualiza el badge de alertas en el sidebar */
+function actualizarBadgeAlertas(n) {
+    const badge = document.getElementById('badge-alertas');
+    if (!badge) return;
+    badge.textContent = n > 0 ? n : '0';
+    if (n > 0) {
+        badge.removeAttribute('data-count');
+        badge.style.display = 'flex';
+    } else {
+        badge.setAttribute('data-count', '0');
+        badge.style.display = 'none';
     }
 }
 
+/** Mini-animacion de rebote cuando un numero cambia */
+function animarContador(el) {
+    el.style.transform = 'scale(1.18)';
+    el.style.color = 'var(--green-400)';
+    setTimeout(() => {
+        el.style.transform = 'scale(1)';
+        el.style.color = '';
+        el.style.transition = 'transform 0.25s ease, color 0.25s ease';
+    }, 220);
+}
+
+function actualizarEstadoPuerto() {
+    const el = document.getElementById('estado-puerto');
+    if (el) el.innerHTML = `<span class="dot-live"></span> Escuchando puerto ${puertoActual}...`;
+}
+
+// ============================================================
+//  GESTION DE ESTUDIANTES — conectado al backend
+// ============================================================
+
 function abrirModalAsignar() {
     document.getElementById('modal-overlay').classList.add('visible');
-    document.getElementById('modal-nombre').focus();
+    setTimeout(() => document.getElementById('modal-documento').focus(), 150);
 }
 
 function cerrarModalDirect() {
     document.getElementById('modal-overlay').classList.remove('visible');
-    document.getElementById('modal-nombre').value = '';
-    document.getElementById('modal-carrera').value = '';
-    document.getElementById('modal-tag').value = '';
+    document.getElementById('form-estudiante').reset();
 }
 
 function cerrarModal(e) {
     if (e.target.id === 'modal-overlay') cerrarModalDirect();
 }
 
-async function guardarEstudiante(e) {
+/**
+ * Guarda un estudiante via POST /api/estudiantes
+ */
+function guardarEstudiante(e) {
     e.preventDefault();
-    const nombre  = document.getElementById('modal-nombre').value.trim();
-    const carrera = document.getElementById('modal-carrera').value.trim();
-    const tag     = document.getElementById('modal-tag').value.trim().toUpperCase();
-    const docFake = Math.floor(1000 + Math.random() * 9000).toString(); // Genera doc temporal
 
-    try {
-        const response = await fetch(`${API_URL}/estudiantes`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nombre, carrera, rfid_tag: tag, documento: docFake })
-        });
+    const documento = document.getElementById('modal-documento').value.trim();
+    const nombre    = document.getElementById('modal-nombre').value.trim();
+    const carrera   = document.getElementById('modal-carrera').value.trim();
+    const tag       = document.getElementById('modal-tag').value.trim().toUpperCase();
 
-        if (response.ok) {
+    if (!documento || !nombre || !carrera || !tag) {
+        mostrarToast('Complete todos los campos.', 'danger');
+        return;
+    }
+
+    fetch(API_BASE + '/api/estudiantes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            documento: documento,
+            nombre: nombre,
+            carrera: carrera,
+            rfid_tag: tag
+        })
+    })
+    .then(res => res.json().then(data => ({ status: res.status, data })))
+    .then(({ status, data }) => {
+        if (status === 201) {
             cerrarModalDirect();
-            cargarEstudiantes();
+            cargarEstudiantesDesdeAPI();
             mostrarToast(`Tarjeta ${tag} asignada a ${nombre}.`, 'ok');
         } else {
-            const errData = await response.json();
-            mostrarToast(`Error: ${errData.error || 'No se pudo guardar'}`, 'danger');
+            mostrarToast(data.error || 'Error al registrar estudiante.', 'danger');
         }
-    } catch (error) {
-        mostrarToast('Error de conexión con el servidor.', 'danger');
-    }
+    })
+    .catch(err => {
+        mostrarToast('Error de conexion al guardar.', 'danger');
+        console.error('Error guardando estudiante:', err);
+    });
 }
 
-async function toggleEstado(tag, nuevoEstado) {
-    try {
-        const response = await fetch(`${API_URL}/estudiantes/estado`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rfid_tag: tag, estado: nuevoEstado })
-        });
+/**
+ * Carga la lista de estudiantes desde GET /api/estudiantes
+ */
+function cargarEstudiantesDesdeAPI(filtro) {
+    fetch(API_BASE + '/api/estudiantes')
+    .then(res => res.json())
+    .then(data => {
+        renderizarEstudiantes(data, filtro);
+    })
+    .catch(err => {
+        mostrarToast('Error al cargar estudiantes.', 'danger');
+        console.error('Error cargando estudiantes:', err);
+    });
+}
 
-        if (response.ok) {
-            cargarEstudiantes();
-            mostrarToast(`Estado de la tarjeta ${tag} actualizado a ${nuevoEstado}.`, 'ok');
-        }
-    } catch (error) {
-        mostrarToast('No se pudo actualizar el estado.', 'danger');
+/** Renderiza la tabla de estudiantes con datos del backend */
+function renderizarEstudiantes(lista, filtro) {
+    const tbody  = document.getElementById('tabla-estudiantes');
+    const sinEst = document.getElementById('sin-estudiantes');
+
+    if (filtro && filtro.trim()) {
+        const q = filtro.toLowerCase();
+        lista = lista.filter(e =>
+            (e.nombre || '').toLowerCase().includes(q) ||
+            (e.carrera || '').toLowerCase().includes(q) ||
+            (e.rfid_tag || '').toLowerCase().includes(q)
+        );
     }
+
+    tbody.innerHTML = '';
+
+    if (!lista || lista.length === 0) {
+        sinEst.style.display = 'flex';
+        return;
+    }
+    sinEst.style.display = 'none';
+
+    lista.forEach(est => {
+        const activo = (est.estado === 'ACTIVO');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="font-weight:500;color:var(--text-main);">${est.nombre}</td>
+            <td style="color:var(--text-muted);">${est.carrera}</td>
+            <td class="rfid-tag">${est.rfid_tag}</td>
+            <td><span class="badge ${activo ? 'ok' : 'warn'}">${est.estado}</span></td>
+            <td><button class="btn-table-action" onclick="toggleEstado(this, '${est.rfid_tag}', '${est.estado}')">${activo ? 'Suspender' : 'Reactivar'}</button></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function filtrarEstudiantes() {
+    const q = document.getElementById('input-buscar').value;
+    cargarEstudiantesDesdeAPI(q);
+}
+
+/**
+ * Cambia el estado de un estudiante via PUT /api/estudiantes/estado
+ */
+function toggleEstado(btn, rfidTag, estadoActual) {
+    const nuevoEstado = estadoActual === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO';
+
+    fetch(API_BASE + '/api/estudiantes/estado', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rfid_tag: rfidTag, estado: nuevoEstado })
+    })
+    .then(res => res.json().then(data => ({ status: res.status, data })))
+    .then(({ status, data }) => {
+        if (status === 200) {
+            cargarEstudiantesDesdeAPI();
+            mostrarToast(
+                nuevoEstado === 'ACTIVO'
+                    ? `Tarjeta ${rfidTag} reactivada.`
+                    : `Tarjeta ${rfidTag} suspendida.`,
+                nuevoEstado === 'ACTIVO' ? 'ok' : 'danger'
+            );
+        } else {
+            mostrarToast(data.error || 'Error al cambiar estado.', 'danger');
+        }
+    })
+    .catch(err => {
+        mostrarToast('Error de conexion.', 'danger');
+        console.error('Error toggle estado:', err);
+    });
 }
 
 // ============================================================
-//  REPORTES DE SESIÓN
+//  REPORTES
 // ============================================================
 
-async function cargarReportesHistorial() {
-    document.getElementById('reporte-ingresos').innerText = document.getElementById('ingresos').innerText;
-    document.getElementById('reporte-alertas').innerText = document.getElementById('alertas').innerText;
-    document.getElementById('reporte-maximo').innerText = aforoMaximo;
+function sincronizarReportes() {
+    // Traer stats actuales del backend
+    fetch(API_BASE + '/api/stats')
+    .then(res => res.json())
+    .then(data => {
+        document.getElementById('reporte-ingresos').innerText = (data.ingresos || 0).toLocaleString();
+        document.getElementById('reporte-alertas').innerText  = (data.alertas || 0).toLocaleString();
+        document.getElementById('reporte-maximo').innerText   = aforoMaximo;
+    })
+    .catch(err => console.error('Error sincronizando reportes:', err));
 
-    try {
-        const res = await fetch(`${API_URL}/ultimos-registros`);
-        const registros = await res.json();
-        const tbody = document.getElementById('tabla-historial');
-        const sinHist = document.getElementById('sin-historial');
+    // Tabla de historial desde los ultimos registros cargados
+    const tbody   = document.getElementById('tabla-historial');
+    const sinHist = document.getElementById('sin-historial');
+    tbody.innerHTML = '';
 
-        if (registros.length === 0) {
-            sinHist.style.display = 'block';
-            tbody.innerHTML = '';
-            return;
-        }
-
-        sinHist.style.display = 'none';
-        tbody.innerHTML = registros.map(reg => `
-            <tr>
-                <td style="color: var(--text-muted);">${reg.fecha_hora}</td>
-                <td>***${reg.idEstudiante}</td>
-                <td class="rfid-tag">${reg.rfid_tag}</td>
-                <td><span class="${reg.estado === 'AUTORIZADO' ? 'badge ok' : 'badge warn'}">${reg.estado}</span></td>
-            </tr>
-        `).join('');
-    } catch (error) {
-        console.error('Error al cargar historial:', error);
+    if (historialCompleto.length === 0) {
+        sinHist.style.display = 'flex';
+        return;
     }
+    sinHist.style.display = 'none';
+
+    historialCompleto.forEach(reg => {
+        const badgeClass = reg.estado === 'AUTORIZADO' ? 'badge ok' : 'badge warn';
+        const idEnmascarado = enmascararId(reg.id);
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="font-family:'JetBrains Mono',monospace;font-size:.85rem;color:var(--text-muted);">${reg.hora}</td>
+            <td style="font-family:'JetBrains Mono',monospace;letter-spacing:1px;">${idEnmascarado}</td>
+            <td class="rfid-tag">${reg.tag}</td>
+            <td><span class="${badgeClass}">${reg.estado}</span></td>
+        `;
+        tbody.appendChild(tr);
+    });
 }
 
-async function exportarReporte() {
-    try {
-        const res = await fetch(`${API_URL}/ultimos-registros`);
-        const registros = await res.json();
-
-        if (registros.length === 0) {
-            mostrarToast('No hay datos para exportar.', 'danger');
-            return;
-        }
-
-        let csv = 'Fecha_Hora,ID,Tag_RFID,Estado\n';
-        registros.forEach(r => {
-            csv += `${r.fecha_hora},***${r.idEstudiante},${r.rfid_tag},${r.estado}\n`;
-        });
-
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement('a');
-        a.href     = url;
-        a.download = `reporte_FET_${new Date().toISOString().slice(0, 10)}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
-        mostrarToast('Reporte CSV descargado.', 'ok');
-    } catch (e) {
-        mostrarToast('Error al exportar reporte.', 'danger');
+/**
+ * Genera y descarga un CSV con el historial.
+ */
+function exportarReporte() {
+    if (historialCompleto.length === 0) {
+        mostrarToast('No hay datos para exportar aun.', 'danger');
+        return;
     }
+    let csv = 'Hora,ID Estudiantil,Tag RFID,Estado\n';
+    historialCompleto.forEach(r => {
+        csv += `${r.hora},${enmascararId(r.id)},${r.tag},${r.estado}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `reporte_FET_${new Date().toLocaleDateString('es-CO').replace(/\//g, '-')}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    mostrarToast(`Reporte CSV descargado (${historialCompleto.length} registros).`, 'ok');
 }
 
 // ============================================================
-//  CONFIGURACIÓN
+//  CONFIGURACION
 // ============================================================
 
 function reconectarServicio(servicio) {
     const estadoEl = document.getElementById(`estado-${servicio}`);
+    if (!estadoEl) return;
     estadoEl.textContent = 'Reconectando...';
-    estadoEl.style.color = 'var(--text-muted)';
+    estadoEl.className = 'status-text-err';
     mostrarToast(`Reconectando ${servicio.toUpperCase()}...`, 'ok');
 
     setTimeout(() => {
         estadoEl.textContent = servicio === 'python' ? 'En Ejecucion' : 'Conectado';
-        estadoEl.style.color = 'var(--primary)';
+        estadoEl.className = 'status-text-ok';
         mostrarToast(`${servicio.toUpperCase()} reconectado correctamente.`, 'ok');
-    }, 1500);
+    }, 2200);
 }
 
 function verLicencia() {
-    mostrarToast('Licencia Privativa - FET Ingeniería de Software 2024. Todos los derechos reservados.', 'ok');
+    mostrarToast('Licencia Privativa — FET Ingenieria de Software 2026. Todos los derechos reservados.', 'ok');
 }
 
 function guardarAforo() {
     const val = parseInt(document.getElementById('input-aforo-max').value);
     if (isNaN(val) || val < 1) {
-        mostrarToast('Ingrese un aforo válido.', 'danger');
+        mostrarToast('Ingrese un aforo valido (mayor a 0).', 'danger');
         return;
     }
     aforoMaximo = val;
+    const lbl = document.getElementById('aforo-max-label');
+    if (lbl) lbl.textContent = aforoMaximo;
+    const aforoActual = parseInt(document.getElementById('aforo').innerText.replace(/,/g, '')) || 0;
+    actualizarBarraAforo(aforoActual);
     document.getElementById('reporte-maximo').innerText = aforoMaximo;
-    mostrarToast(`Aforo máximo actualizado a ${aforoMaximo} personas.`, 'ok');
+    mostrarToast(`Aforo maximo actualizado a ${aforoMaximo} personas.`, 'ok');
 }
 
 function guardarPuerto() {
@@ -342,15 +537,35 @@ function guardarPuerto() {
 }
 
 // ============================================================
-//  TOAST DE NOTIFICACIÓN
+//  TOAST DE NOTIFICACION
 // ============================================================
 
 let toastTimeout = null;
 
 function mostrarToast(mensaje, tipo = 'ok') {
     const toast = document.getElementById('toast');
-    toast.textContent = mensaje;
+    const icono = tipo === 'ok'
+        ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18" style="flex-shrink:0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`
+        : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+
+    toast.innerHTML = icono + `<span>${mensaje}</span>`;
     toast.className = `toast toast-${tipo} visible`;
     clearTimeout(toastTimeout);
-    toastTimeout = setTimeout(() => toast.classList.remove('visible'), 3500);
+    toastTimeout = setTimeout(() => toast.classList.remove('visible'), 3800);
 }
+
+// ============================================================
+//  SHAKE (login fallido)
+// ============================================================
+
+const shakeStyle = document.createElement('style');
+shakeStyle.textContent = `
+@keyframes shake {
+    0%,100% { transform: translateX(0); }
+    20%     { transform: translateX(-8px); }
+    40%     { transform: translateX(8px); }
+    60%     { transform: translateX(-5px); }
+    80%     { transform: translateX(5px); }
+}
+`;
+document.head.appendChild(shakeStyle);

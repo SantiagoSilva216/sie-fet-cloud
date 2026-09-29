@@ -5,7 +5,10 @@ from flask_cors import CORS
 import mysql.connector
 
 app = Flask(__name__)
-CORS(app)  # Permite peticiones desde la interfaz web y dispositivos externos (como el ESP32)
+# CORS: permite peticiones desde Vercel, ESP32 y desarrollo local
+CORS(app, resources={r"/api/*": {"origins": "*"}})
+# Nota: en produccion puedes restringir a tu URL exacta de Vercel:
+# CORS(app, origins=['https://tu-proyecto.vercel.app'])
 
 # Buscar certificado SSL del sistema (necesario para TiDB Cloud en Render)
 ssl_ca_path = '/etc/ssl/certs/ca-certificates.crt'
@@ -220,4 +223,5 @@ def login():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    # debug=False en produccion (Render)
+    app.run(host='0.0.0.0', port=port, debug=os.environ.get('FLASK_DEBUG', 'false').lower() == 'true')

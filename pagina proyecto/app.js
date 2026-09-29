@@ -9,11 +9,12 @@
 const API_BASE = 'https://sistema-fet-backend.onrender.com';
 
 // ── Estado global ──
-let aforoMaximo   = 150;
-let puertoActual  = 'COM3';
+let aforoMaximo       = 150;
+let puertoActual      = 'COM3';
 let historialCompleto = [];
 let pollingInterval   = null;
-let ultimoRegistroId  = 0; // para detectar registros nuevos
+let ultimoRegistroId  = 0;
+let monitorPausado    = false; // true cuando el usuario pulsa "Limpiar"
 
 // ============================================================
 //  LOGIN / LOGOUT
@@ -93,6 +94,7 @@ function salirSistema() {
         clearInterval(pollingInterval);
         pollingInterval = null;
     }
+    monitorPausado = false; // resetear pausa al cerrar sesion
     document.getElementById('app-layout').style.display = 'none';
     const loginScreen = document.getElementById('login-screen');
     loginScreen.style.display  = 'flex';
@@ -173,9 +175,11 @@ function cargarEstadisticas() {
 }
 
 /**
- * Consulta GET /api/ultimos-registros para llenar la tabla de monitoreo
+ * Consulta GET /api/ultimos-registros para llenar la tabla de monitoreo.
+ * Se omite si el monitor esta pausado por el usuario.
  */
 function cargarUltimosRegistros() {
+    if (monitorPausado) return; // respetar pausa del usuario
     fetch(API_BASE + '/api/ultimos-registros')
     .then(res => res.json())
     .then(registros => {
@@ -232,12 +236,49 @@ function enmascararId(id) {
     return '***' + s.slice(-4);
 }
 
+/**
+ * Limpia la vista de la tabla Y pausa el polling.
+ * Pulsando de nuevo "Reanudar" retoma el monitoreo en vivo.
+ */
 function limpiarRegistros() {
-    document.getElementById('tabla-registros').innerHTML = '';
-    document.getElementById('sin-registros').style.display = 'flex';
-    document.getElementById('table-count').textContent = '0 registros';
-    historialCompleto = [];
-    mostrarToast('Vista de registros limpiada.', 'ok');
+    const btn = document.getElementById('btn-limpiar');
+
+    if (!monitorPausado) {
+        // ── PAUSAR y limpiar ──
+        monitorPausado = true;
+        document.getElementById('tabla-registros').innerHTML = '';
+        document.getElementById('sin-registros').style.display = 'flex';
+        document.getElementById('aforo').innerText    = '0';
+        document.getElementById('ingresos').innerText = '0';
+        document.getElementById('alertas').innerText  = '0';
+        document.getElementById('table-count').textContent = '0 registros';
+        actualizarBarraAforo(0);
+        actualizarBadgeAlertas(0);
+        historialCompleto = [];
+        // Cambiar boton a "Reanudar"
+        if (btn) {
+            btn.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Reanudar
+            `;
+            btn.title = 'Reanudar monitoreo en vivo';
+        }
+        mostrarToast('Monitoreo pausado. Pulse Reanudar para continuar.', 'ok');
+    } else {
+        // ── REANUDAR ──
+        monitorPausado = false;
+        cargarEstadisticas();
+        cargarUltimosRegistros();
+        // Restaurar boton
+        if (btn) {
+            btn.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                Limpiar
+            `;
+            btn.title = 'Limpiar registros de la vista';
+        }
+        mostrarToast('Monitoreo reanudado.', 'ok');
+    }
 }
 
 /** Actualiza visualmente la barra de aforo */

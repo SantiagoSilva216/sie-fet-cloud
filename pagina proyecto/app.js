@@ -2,7 +2,7 @@
 //  app.js  –  Integración con Backend Flask (FET S.I.E)
 // ============================================================
 
-const API_URL = 'http://localhost:5000/api';
+const API_URL = 'https://sistema-fet-backend.onrender.com/api';
 const CREDENCIALES = { usuario: 'admin', clave: '1234' };
 
 let aforoMaximo = 150;

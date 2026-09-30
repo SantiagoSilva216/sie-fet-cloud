@@ -8,13 +8,22 @@
 // ── URL del backend en Render (TiDB Cloud + Flask) ──
 const API_BASE = 'https://sistema-fet-backend.onrender.com';
 
+// ── Aplicar tema guardado ANTES del primer render (evita flash) ──
+(function aplicarTemaGuardado() {
+    const temaGuardado = localStorage.getItem('fet-theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', temaGuardado);
+    // Los iconos se sincronizan despues del DOMContentLoaded
+})();
+
 // ── Estado global ──
 let aforoMaximo       = 150;
 let puertoActual      = 'COM3';
 let historialCompleto = [];
 let pollingInterval   = null;
 let monitorPausado    = false;
-let clearId           = 0; // ID del ultimo registro al momento de limpiar (marca de agua)
+let clearId           = 0;  // ID del ultimo registro al momento de limpiar (marca de agua)
+let lastNotifiedId    = 0;  // ID del ultimo registro para el que se mostro notificacion
+let firstPollDone     = false; // true tras el primer ciclo de polling (evita notificar historico)
 
 // ============================================================
 //  LOGIN / LOGOUT
@@ -94,8 +103,10 @@ function salirSistema() {
         clearInterval(pollingInterval);
         pollingInterval = null;
     }
-    monitorPausado = false;
-    clearId        = 0;  // resetear marca de agua al cerrar sesion
+    monitorPausado  = false;
+    clearId         = 0;
+    lastNotifiedId  = 0;   // resetear al cerrar sesion
+    firstPollDone   = false;
     document.getElementById('app-layout').style.display = 'none';
     const loginScreen = document.getElementById('login-screen');
     loginScreen.style.display  = 'flex';
@@ -132,6 +143,8 @@ function cambiarVista(idVista, btnElement) {
 
 function iniciarMonitor() {
     historialCompleto = [];
+    lastNotifiedId    = 0;
+    firstPollDone     = false;
     actualizarEstadoPuerto();
 
     // Cargar datos iniciales desde el backend
@@ -178,12 +191,36 @@ function cargarEstadisticas() {
 /**
  * Consulta GET /api/ultimos-registros para llenar la tabla de monitoreo.
  * Solo muestra registros posteriores al clearTimestamp (si existe).
+ * Detecta registros NUEVOS en cada ciclo de polling y muestra notificacion con nombre.
  */
 function cargarUltimosRegistros() {
     if (monitorPausado) return;
     fetch(API_BASE + '/api/ultimos-registros')
     .then(res => res.json())
-    .then(registros => {
+    .then(registrosRaw => {
+        // ── NOTIFICACIONES DE INGRESO / SALIDA ──
+        // En el primer ciclo solo guardamos el watermark sin notificar (historial existente).
+        if (!firstPollDone) {
+            if (registrosRaw.length > 0) {
+                lastNotifiedId = Math.max(...registrosRaw.map(r => r.id || 0));
+            }
+            firstPollDone = true;
+        } else {
+            // Detectar registros con id mayor al ultimo notificado
+            const nuevos = registrosRaw
+                .filter(r => (r.id || 0) > lastNotifiedId)
+                .reverse(); // mostrar en orden cronologico (el mas antiguo primero)
+            nuevos.forEach(reg => {
+                mostrarNotificacionAcceso(reg);
+            });
+            if (registrosRaw.length > 0) {
+                const maxId = Math.max(...registrosRaw.map(r => r.id || 0));
+                if (maxId > lastNotifiedId) lastNotifiedId = maxId;
+            }
+        }
+
+        // ── FILTRADO Y TABLA ──
+        let registros = registrosRaw;
         const tabla  = document.getElementById('tabla-registros');
         const sinReg = document.getElementById('sin-registros');
         const contEl = document.getElementById('table-count');
@@ -206,12 +243,16 @@ function cargarUltimosRegistros() {
         tabla.innerHTML = '';
         registros.forEach(reg => {
             const idEnmascarado = enmascararId(reg.idEstudiante || reg.documento || '0000');
-            const badgeClass = reg.estado === 'AUTORIZADO' ? 'badge ok' : 'badge warn';
+            // Badge: INGRESO=verde, SALIDA=outline verde, DENEGADO=blanco
+            const badgeClass = reg.estado === 'INGRESO'    ? 'badge ok'
+                             : reg.estado === 'AUTORIZADO' ? 'badge ok'    // legacy
+                             : reg.estado === 'SALIDA'     ? 'badge salida'
+                             : 'badge warn';
             const hora = reg.fecha_hora || '';
 
             const tr = document.createElement('tr');
             tr.className = 'new-row';
-            tr.dataset.recordId = reg.id || 0;  // guardar ID para la marca de agua
+            tr.dataset.recordId = reg.id || 0;
             tr.innerHTML = `
                 <td style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:.85rem;">${hora}</td>
                 <td style="font-family:'JetBrains Mono',monospace;letter-spacing:1px;color:var(--text-sub);">${idEnmascarado}</td>
@@ -221,7 +262,7 @@ function cargarUltimosRegistros() {
             tabla.appendChild(tr);
         });
 
-        // Actualizar historial para reportes (incluye dbId para la marca de agua)
+        // Actualizar historial para reportes
         historialCompleto = registros.map(r => ({
             dbId: r.id || 0,
             hora: r.fecha_hora || '',
@@ -231,6 +272,53 @@ function cargarUltimosRegistros() {
         }));
     })
     .catch(err => console.error('Error cargando registros:', err));
+}
+
+/**
+ * Muestra una notificacion prominente cuando se detecta un nuevo registro RFID.
+ * Diferencia entre Ingreso, Salida y Acceso denegado.
+ * @param {object} reg - Objeto de registro con estado, nombre_estudiante y rfid_tag
+ */
+function mostrarNotificacionAcceso(reg) {
+    const nombre = reg.nombre_estudiante || null;
+    const tag    = reg.rfid_tag || '';
+
+    if (reg.estado === 'INGRESO' || reg.estado === 'AUTORIZADO') {
+        // Ingreso autorizado
+        const quien = nombre ? nombre : `Tag: ${tag}`;
+        mostrarToastEvento(`\u2705 Ingreso \u2014 ${quien}`, 'ok');
+
+    } else if (reg.estado === 'SALIDA') {
+        // Salida registrada
+        const quien = nombre ? nombre : `Tag: ${tag}`;
+        mostrarToastEvento(`\uD83D\uDEAA Salida \u2014 ${quien}`, 'salida');
+
+    } else {
+        // DENEGADO: tag desconocido o estudiante suspendido
+        const quien = nombre ? `${nombre} (suspendido)` : `Tag desconocido: ${tag}`;
+        mostrarToastEvento(`\u26D4 Acceso Denegado \u2014 ${quien}`, 'danger');
+    }
+}
+
+/**
+ * Toast especial para eventos de ingreso/salida/acceso (dura 5.5 s, mas prominente).
+ * @param {string} mensaje - Texto a mostrar
+ * @param {string} tipo    - 'ok' | 'salida' | 'danger'
+ */
+function mostrarToastEvento(mensaje, tipo) {
+    const toast = document.getElementById('toast');
+
+    const iconos = {
+        ok:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20" style="flex-shrink:0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`,
+        salida: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20" style="flex-shrink:0"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>`,
+        danger: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`
+    };
+
+    const claseToast = tipo === 'salida' ? 'toast-salida' : `toast-${tipo}`;
+    toast.innerHTML  = (iconos[tipo] || iconos.danger) + `<span style="font-size:1rem;font-weight:600;">${mensaje}</span>`;
+    toast.className  = `toast ${claseToast} visible toast-evento`;
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => toast.classList.remove('visible'), 5500);
 }
 
 /**
@@ -256,7 +344,9 @@ function limpiarRegistros() {
     .then(({ status, data }) => {
         if (status === 200) {
             // Limpiar UI completamente
-            clearId = 0;
+            clearId        = 0;
+            lastNotifiedId = 0;   // la BD queda vacia, resetear watermark de notificaciones
+            firstPollDone  = false;
             historialCompleto = [];
             document.getElementById('tabla-registros').innerHTML = '';
             document.getElementById('sin-registros').style.display = 'flex';
@@ -422,12 +512,23 @@ function renderizarEstudiantes(lista, filtro) {
     lista.forEach(est => {
         const activo = (est.estado === 'ACTIVO');
         const tr = document.createElement('tr');
+        // Escapar el nombre para usarlo en el atributo data sin romper el HTML
+        const nombreEscapado = (est.nombre || '').replace(/'/g, "\\'");
         tr.innerHTML = `
             <td style="font-weight:500;color:var(--text-main);">${est.nombre}</td>
             <td style="color:var(--text-muted);">${est.carrera}</td>
             <td class="rfid-tag">${est.rfid_tag}</td>
             <td><span class="badge ${activo ? 'ok' : 'warn'}">${est.estado}</span></td>
-            <td><button class="btn-table-action" onclick="toggleEstado(this, '${est.rfid_tag}', '${est.estado}')">${activo ? 'Suspender' : 'Reactivar'}</button></td>
+            <td class="td-acciones">
+                <button class="btn-table-action" onclick="toggleEstado(this, '${est.rfid_tag}', '${est.estado}')">${activo ? 'Suspender' : 'Reactivar'}</button>
+                <button class="btn-table-action btn-table-delete" onclick="eliminarEstudiante('${est.rfid_tag}', '${nombreEscapado}')" aria-label="Eliminar estudiante ${est.nombre}" title="Eliminar estudiante">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" aria-hidden="true">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                    </svg>
+                    Eliminar
+                </button>
+            </td>
         `;
         tbody.appendChild(tr);
     });
@@ -466,6 +567,42 @@ function toggleEstado(btn, rfidTag, estadoActual) {
     .catch(err => {
         mostrarToast('Error de conexion.', 'danger');
         console.error('Error toggle estado:', err);
+    });
+}
+
+/**
+ * Elimina PERMANENTEMENTE un estudiante (y sus registros de acceso)
+ * via DELETE /api/estudiantes/<rfid_tag>, previa confirmacion del usuario.
+ * @param {string} rfidTag  - Codigo RFID del estudiante a eliminar
+ * @param {string} nombre   - Nombre del estudiante (para el mensaje de confirmacion)
+ */
+function eliminarEstudiante(rfidTag, nombre) {
+    // Pedir confirmacion antes de ejecutar la accion irreversible
+    const confirmado = window.confirm(
+        `⚠️ ¿Eliminar permanentemente al estudiante "${nombre}"?\n\n` +
+        `Se borrarán también todos sus registros de acceso RFID.\n` +
+        `Esta acción NO se puede deshacer.`
+    );
+    if (!confirmado) return;
+
+    fetch(`${API_BASE}/api/estudiantes/${encodeURIComponent(rfidTag)}`, {
+        method: 'DELETE'
+    })
+    .then(res => res.json().then(data => ({ status: res.status, data })))
+    .then(({ status, data }) => {
+        if (status === 200) {
+            cargarEstudiantesDesdeAPI();
+            mostrarToast(
+                `Estudiante "${nombre}" eliminado correctamente.`,
+                'ok'
+            );
+        } else {
+            mostrarToast(data.error || 'Error al eliminar el estudiante.', 'danger');
+        }
+    })
+    .catch(err => {
+        mostrarToast('Error de conexion al eliminar.', 'danger');
+        console.error('Error eliminando estudiante:', err);
     });
 }
 
@@ -609,3 +746,57 @@ shakeStyle.textContent = `
 }
 `;
 document.head.appendChild(shakeStyle);
+
+// ============================================================
+//  MODO OSCURO / CLARO
+// ============================================================
+
+/**
+ * Alterna entre modo oscuro y modo claro, actualizando:
+ *   - El atributo data-theme en <html>
+ *   - Los iconos y etiqueta del boton toggle
+ *   - localStorage para persistencia entre sesiones
+ */
+function toggleTema() {
+    const html       = document.documentElement;
+    const temaActual = html.getAttribute('data-theme') || 'dark';
+    const nuevoTema  = temaActual === 'dark' ? 'light' : 'dark';
+
+    html.setAttribute('data-theme', nuevoTema);
+    localStorage.setItem('fet-theme', nuevoTema);
+    sincronizarIconoTema(nuevoTema);
+    mostrarToast(
+        nuevoTema === 'light' ? 'Modo Claro activado.' : 'Modo Oscuro activado.',
+        'ok'
+    );
+}
+
+/**
+ * Actualiza el icono (luna / sol) y la etiqueta del boton toggle
+ * segun el tema pasado.
+ * @param {string} tema - 'dark' | 'light'
+ */
+function sincronizarIconoTema(tema) {
+    const iconDark  = document.getElementById('theme-icon-dark');
+    const iconLight = document.getElementById('theme-icon-light');
+    const label     = document.getElementById('theme-label');
+    if (!iconDark || !iconLight || !label) return;
+
+    if (tema === 'light') {
+        // Modo claro activo: mostrar icono de sol para indicar "volver a oscuro"
+        iconDark.style.display  = 'none';
+        iconLight.style.display = 'flex';
+        label.textContent       = 'Modo Oscuro';
+    } else {
+        // Modo oscuro activo: mostrar icono de luna para indicar "ir a claro"
+        iconDark.style.display  = 'flex';
+        iconLight.style.display = 'none';
+        label.textContent       = 'Modo Claro';
+    }
+}
+
+// Sincronizar icono con el tema que se cargo al inicio
+document.addEventListener('DOMContentLoaded', () => {
+    const temaGuardado = localStorage.getItem('fet-theme') || 'dark';
+    sincronizarIconoTema(temaGuardado);
+});

@@ -54,52 +54,89 @@ def rfid_scan():
     estudiante = cursor.fetchone()
 
     if estudiante:
-        estado_registro = 'AUTORIZADO'
         doc_estudiante = estudiante['documento']
-        estudiante_id = estudiante['id']
-    else:
-        estado_registro = 'DENEGADO'
-        doc_estudiante = '0000'
-        estudiante_id = None
+        estudiante_id  = estudiante['id']
 
-    # Registrar el acceso en el historial
+        # Logica Ingreso / Salida: el campo 'dentro' indica presencia actual
+        # 0 = afuera (siguiente scan = INGRESO), 1 = adentro (siguiente scan = SALIDA)
+        esta_dentro = bool(estudiante.get('dentro', 0))
+
+        if esta_dentro:
+            # Ya estaba adentro → registrar SALIDA y marcarlo como afuera
+            estado_registro = 'SALIDA'
+            nuevo_dentro    = 0
+        else:
+            # Estaba afuera → registrar INGRESO y marcarlo como adentro
+            estado_registro = 'INGRESO'
+            nuevo_dentro    = 1
+
+        # Actualizar presencia del estudiante
+        cursor.execute(
+            "UPDATE estudiantes SET dentro = %s WHERE id = %s",
+            (nuevo_dentro, estudiante_id)
+        )
+    else:
+        # Tag no registrado o estudiante suspendido
+        estado_registro = 'DENEGADO'
+        doc_estudiante  = '0000'
+        estudiante_id   = None
+
+    # Registrar el evento en el historial
     cursor.execute(
         "INSERT INTO registros_acceso (estudiante_id, rfid_tag, estado) VALUES (%s, %s, %s)",
         (estudiante_id, rfid_tag, estado_registro)
     )
     conn.commit()
-
     cursor.close()
     conn.close()
 
     return jsonify({
         'idEstudiante': doc_estudiante,
-        'codigoRfid': rfid_tag,
-        'estadoStr': estado_registro
+        'codigoRfid':   rfid_tag,
+        'estadoStr':    estado_registro
     })
 
 
 # 2. ENDPOINT PARA OBTENER LOS ÚLTIMOS 5 REGISTROS (Para Monitoreo en Vivo en el Frontend)
 @app.route('/api/ultimos-registros', methods=['GET'])
 def ultimos_registros():
+    from datetime import timedelta
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
+    # Se trae fecha_hora como objeto datetime (sin DATE_FORMAT) para poder
+    # ajustar la zona horaria en Python: Render corre en UTC, Colombia = UTC-5
     query = """
         SELECT r.id,
-               DATE_FORMAT(r.fecha_hora, '%Y-%m-%d %H:%i:%s') AS fecha_hora, 
-               r.rfid_tag, 
-               r.estado, 
-               COALESCE(e.documento, '0000') AS idEstudiante
+               r.fecha_hora,
+               r.rfid_tag,
+               r.estado,
+               COALESCE(e.documento, '0000') AS idEstudiante,
+               e.nombre                      AS nombre_estudiante
         FROM registros_acceso r
         LEFT JOIN estudiantes e ON r.estudiante_id = e.id
         ORDER BY r.id DESC LIMIT 5
     """
     cursor.execute(query)
     registros = cursor.fetchall()
-
     cursor.close()
     conn.close()
+
+    # Ajustar zona horaria UTC → Colombia (UTC-5) y formatear como dd/mm/yyyy HH:MM:SS
+    bogota = timedelta(hours=-5)
+    for reg in registros:
+        dt = reg.get('fecha_hora')
+        if dt:
+            try:
+                dt_bogota = dt + bogota
+                reg['fecha_hora'] = dt_bogota.strftime('%d/%m/%Y %H:%M:%S')
+            except Exception:
+                reg['fecha_hora'] = str(dt)
+        else:
+            reg['fecha_hora'] = ''
+        # Asegurar que nombre_estudiante sea string o None
+        if reg.get('nombre_estudiante') is None:
+            reg['nombre_estudiante'] = None
 
     return jsonify(registros)
 
@@ -110,7 +147,7 @@ def obtener_estudiantes():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
-    cursor.execute("SELECT nombre, carrera, rfid_tag, estado FROM estudiantes")
+    cursor.execute("SELECT id, documento, nombre, carrera, rfid_tag, estado FROM estudiantes")
     estudiantes = cursor.fetchall()
 
     cursor.close()
@@ -125,19 +162,32 @@ def obtener_estadisticas():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
-    cursor.execute("SELECT COUNT(*) AS total FROM registros_acceso WHERE estado = 'AUTORIZADO'")
+    # Ingresos totales (INGRESO + AUTORIZADO legacy para compatibilidad)
+    cursor.execute("""
+        SELECT COUNT(*) AS total FROM registros_acceso
+        WHERE estado IN ('INGRESO', 'AUTORIZADO')
+    """)
     ingresos = cursor.fetchone()['total']
 
+    # Salidas totales
+    cursor.execute("SELECT COUNT(*) AS total FROM registros_acceso WHERE estado = 'SALIDA'")
+    salidas = cursor.fetchone()['total']
+
+    # Alertas (accesos denegados)
     cursor.execute("SELECT COUNT(*) AS total FROM registros_acceso WHERE estado = 'DENEGADO'")
     alertas = cursor.fetchone()['total']
 
     cursor.close()
     conn.close()
 
+    # Aforo neto = ingresos - salidas (personas actualmente adentro)
+    aforo_neto = max(0, ingresos - salidas)
+
     return jsonify({
-        'aforo': ingresos,
+        'aforo':    aforo_neto,
         'ingresos': ingresos,
-        'alertas': alertas
+        'salidas':  salidas,
+        'alertas':  alertas
     })
 
 
@@ -234,6 +284,40 @@ def eliminar_registros():
         cursor.close()
         conn.close()
         return jsonify({'mensaje': f'{filas_eliminadas} registros eliminados correctamente'}), 200
+    except mysql.connector.Error as err:
+        return jsonify({'error': str(err)}), 500
+
+
+
+# 9. ENDPOINT PARA ELIMINAR UN ESTUDIANTE Y SUS REGISTROS DE ACCESO
+@app.route('/api/estudiantes/<rfid_tag>', methods=['DELETE'])
+def eliminar_estudiante(rfid_tag):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Verificar que el estudiante existe
+        cursor.execute("SELECT id, nombre FROM estudiantes WHERE rfid_tag = %s", (rfid_tag,))
+        estudiante = cursor.fetchone()
+        if not estudiante:
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'Estudiante no encontrado'}), 404
+
+        # Eliminar sus registros de acceso primero (integridad referencial)
+        cursor.execute("DELETE FROM registros_acceso WHERE estudiante_id = %s", (estudiante['id'],))
+        registros_eliminados = cursor.rowcount
+
+        # Eliminar el estudiante
+        cursor.execute("DELETE FROM estudiantes WHERE rfid_tag = %s", (rfid_tag,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'mensaje': f"Estudiante '{estudiante['nombre']}' eliminado correctamente",
+            'registros_acceso_eliminados': registros_eliminados
+        }), 200
     except mysql.connector.Error as err:
         return jsonify({'error': str(err)}), 500
 

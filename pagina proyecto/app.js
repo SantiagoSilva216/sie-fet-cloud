@@ -107,6 +107,7 @@ function salirSistema() {
     clearId         = 0;
     lastNotifiedId  = 0;   // resetear al cerrar sesion
     firstPollDone   = false;
+    cerrarSidebar(); // cerrar sidebar móvil si estaba abierto
     document.getElementById('app-layout').style.display = 'none';
     const loginScreen = document.getElementById('login-screen');
     loginScreen.style.display  = 'flex';
@@ -117,6 +118,38 @@ function salirSistema() {
     document.getElementById('btn-login').querySelector('.btn-text').textContent = 'Iniciar Sesion';
     setTimeout(() => { loginScreen.style.opacity = '1'; }, 50);
     mostrarToast('Sesion cerrada correctamente.', 'ok');
+}
+
+// ============================================================
+//  SIDEBAR MÓVIL — hamburguesa / cajero deslizante
+// ============================================================
+
+/**
+ * Abre el sidebar como panel deslizante (sólo activo en móvil ≤768px).
+ * En escritorio no hace nada (el sidebar siempre es visible).
+ */
+function abrirSidebar() {
+    const sidebar  = document.getElementById('sidebar');
+    const overlay  = document.getElementById('sidebar-overlay');
+    if (!sidebar || !overlay) return;
+    sidebar.classList.add('sidebar-open');
+    overlay.classList.add('visible');
+    document.body.classList.add('sidebar-is-open');
+    // Actualizar aria-expanded en todos los botones hamburguesa
+    document.querySelectorAll('.btn-hamburger').forEach(b => b.setAttribute('aria-expanded', 'true'));
+}
+
+/**
+ * Cierra el sidebar móvil.
+ */
+function cerrarSidebar() {
+    const sidebar  = document.getElementById('sidebar');
+    const overlay  = document.getElementById('sidebar-overlay');
+    if (!sidebar || !overlay) return;
+    sidebar.classList.remove('sidebar-open');
+    overlay.classList.remove('visible');
+    document.body.classList.remove('sidebar-is-open');
+    document.querySelectorAll('.btn-hamburger').forEach(b => b.setAttribute('aria-expanded', 'false'));
 }
 
 // ============================================================
@@ -132,6 +165,9 @@ function cambiarVista(idVista, btnElement) {
     btnElement.classList.add('active');
     btnElement.setAttribute('aria-current', 'page');
     document.getElementById('vista-' + idVista).classList.add('active');
+
+    // En móvil cerrar el sidebar al navegar
+    if (window.innerWidth <= 768) cerrarSidebar();
 
     if (idVista === 'reportes') sincronizarReportes();
     if (idVista === 'estudiantes') cargarEstudiantesDesdeAPI();

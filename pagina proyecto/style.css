@@ -2061,32 +2061,360 @@ body,
 }
 
 /* ================================================================
-   RESPONSIVE
+   RESPONSIVE — Sistema FET (móvil + tablet)
    ================================================================ */
-@media(max-width:1100px) {
+
+/* ── Botón Hamburguesa (oculto en escritorio) ── */
+.btn-hamburger {
+    display: none; /* oculto por defecto en escritorio */
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid var(--border-md);
+    border-radius: var(--radius-xs);
+    color: var(--text-muted);
+    width: 38px;
+    height: 38px;
+    cursor: pointer;
+    transition: var(--transition);
+    flex-shrink: 0;
+    margin-right: 10px;
+}
+
+.btn-hamburger:hover {
+    background: var(--primary-glow-sm);
+    border-color: var(--green-700);
+    color: var(--green-200);
+}
+
+/* Botón X cerrar sidebar dentro del brand (oculto en escritorio) */
+.btn-sidebar-close {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid var(--white-20);
+    border-radius: var(--radius-xs);
+    color: var(--white-80);
+    width: 32px;
+    height: 32px;
+    cursor: pointer;
+    transition: var(--transition);
+    flex-shrink: 0;
+    margin-right: 8px;
+}
+
+.btn-sidebar-close:hover {
+    background: var(--white-08);
+    color: var(--white);
+    border-color: var(--white-50);
+}
+
+[data-theme="light"] .btn-hamburger {
+    border-color: rgba(46,139,46,0.25);
+    color: var(--text-muted);
+}
+
+[data-theme="light"] .btn-hamburger:hover {
+    background: rgba(46,139,46,0.07);
+    border-color: var(--green-700);
+    color: var(--green-700);
+}
+
+[data-theme="light"] .btn-sidebar-close {
+    border-color: rgba(255,255,255,0.30);
+    color: rgba(255,255,255,0.80);
+}
+
+/* ── Overlay (tap-to-close) ── */
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    transition: opacity 0.30s ease;
+}
+
+.sidebar-overlay.visible {
+    opacity: 1;
+}
+
+/* ── Tablet ancho (1100px) ── */
+@media (max-width: 1100px) {
     .grid-3 {
         grid-template-columns: repeat(2, 1fr);
     }
 }
 
-@media(max-width:800px) {
-    :root {
-        --sidebar-w: 220px;
+/* ================================================================
+   BREAKPOINT TABLET / MÓVIL ≤ 768px
+   ================================================================ */
+@media (max-width: 768px) {
+
+    /* Body: permitir scroll vertical, bloquear overflow-x */
+    body {
+        overflow-y: auto;
+        overflow-x: hidden;
+        height: auto;
+        min-height: 100vh;
     }
 
+    /* Bloquear scroll del body cuando sidebar está abierto */
+    body.sidebar-is-open {
+        overflow: hidden;
+    }
+
+    /* ── App layout: columna única ── */
+    #app-layout {
+        flex-direction: column;
+        height: auto;
+        min-height: 100vh;
+    }
+
+    /* ── Sidebar: panel deslizante desde la izquierda ── */
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100vh;
+        width: min(82vw, 300px);
+        z-index: 1000;
+        transform: translateX(-110%);
+        transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: none;
+        overflow-y: auto;
+    }
+
+    /* Sidebar abierto */
+    .sidebar.sidebar-open {
+        transform: translateX(0);
+        box-shadow: 6px 0 40px rgba(0, 0, 0, 0.55);
+    }
+
+    /* Mostrar overlay solo en móvil */
+    .sidebar-overlay {
+        display: block;
+        pointer-events: none;
+    }
+
+    .sidebar-overlay.visible {
+        pointer-events: all;
+    }
+
+    /* Mostrar botón hamburguesa */
+    .btn-hamburger {
+        display: flex;
+    }
+
+    /* Mostrar botón cerrar dentro del sidebar */
+    .btn-sidebar-close {
+        display: flex;
+    }
+
+    /* Header izquierdo con hamburguesa alineado */
+    .header-left {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0;
+    }
+
+    .header-left h2 {
+        font-size: 1.05rem;
+    }
+
+    .header-left .header-sub {
+        flex-basis: 100%;
+        margin-top: 4px;
+    }
+
+    /* ── Contenido principal ── */
+    .main-content {
+        overflow-y: auto;
+        flex: 1;
+    }
+
+    /* ── View sections ── */
     .view-section {
-        padding: 18px;
+        padding: 18px 16px 24px;
     }
 
+    /* ── Header superior ── */
+    .top-header {
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 18px;
+        padding-bottom: 14px;
+    }
+
+    .header-actions {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    /* ── Grids: 1 columna ── */
     .grid-3 {
         grid-template-columns: 1fr;
+        gap: 12px;
+        margin-bottom: 16px;
     }
 
+    /* ── Cards: más compactas ── */
+    .cyber-card {
+        padding: 16px;
+    }
+
+    .card-body .value {
+        font-size: 2rem;
+    }
+
+    /* ── Tabla: scroll horizontal + columnas legibles ── */
+    .cyber-table-container {
+        border-radius: var(--radius-sm);
+    }
+
+    .table-scroll {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    table {
+        min-width: 480px; /* garantiza que la tabla no se comprima */
+    }
+
+    th, td {
+        padding: 10px 14px;
+        font-size: .82rem;
+    }
+
+    /* ── Toast full-width en móvil ── */
+    .toast {
+        left: 12px;
+        right: 12px;
+        bottom: 16px;
+        max-width: none;
+        border-radius: var(--radius-sm);
+    }
+
+    .toast-evento {
+        min-width: unset;
+        max-width: none;
+    }
+
+    /* ── Modal ── */
+    .modal-box {
+        padding: 24px 20px;
+        width: calc(100vw - 32px);
+    }
+
+    /* ── Login box ── */
+    .login-box {
+        width: calc(100vw - 40px);
+        padding: 36px 28px;
+    }
+
+    /* ── Botones sm ── */
+    .btn-sm {
+        padding: 8px 14px;
+        font-size: .76rem;
+    }
+
+    /* ── About grid ── */
     .about-grid {
         grid-template-columns: 1fr;
     }
 
+    /* ── Latencia ── */
     .latencia-row {
         flex-wrap: wrap;
+        gap: 12px;
+    }
+
+    .mejora-badge {
+        margin-left: 0;
+        font-size: .95rem;
+    }
+
+    /* ── Config row ── */
+    .config-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .config-controls {
+        width: 100%;
+    }
+
+    .input-small {
+        width: 100%;
+        flex: 1;
+    }
+
+    /* ── Barra comparacion ── */
+    .barra-label {
+        width: 80px;
+        font-size: .74rem;
+    }
+}
+
+/* ================================================================
+   BREAKPOINT MÓVIL PEQUEÑO ≤ 640px
+   ================================================================ */
+@media (max-width: 640px) {
+
+    /* Login aún más compacto */
+    .login-box {
+        padding: 28px 20px;
+    }
+
+    #login-title {
+        font-size: 1.5rem;
+        letter-spacing: 2px;
+    }
+
+    /* Ocultar columnas secundarias de la tabla en pantallas muy pequeñas */
+    /* (La tabla tendrá scroll horizontal para mostrarlas todas igualmente) */
+    table {
+        min-width: 400px;
+    }
+
+    th, td {
+        padding: 9px 10px;
+        font-size: .78rem;
+    }
+
+    /* Cards aún más compactas */
+    .cyber-card {
+        padding: 14px;
+    }
+
+    .card-body .value {
+        font-size: 1.8rem;
+    }
+
+    /* Header más compacto */
+    .header-left h2 {
+        font-size: .95rem;
+    }
+
+    .view-section {
+        padding: 14px 12px 20px;
+    }
+
+    /* Tabla de acciones en columna */
+    .td-acciones {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+
+    /* Toast compacto */
+    .toast {
+        font-size: .84rem;
+        padding: 12px 14px;
     }
 }

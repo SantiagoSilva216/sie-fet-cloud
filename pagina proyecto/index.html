@@ -80,9 +80,21 @@
     <!-- =================== LAYOUT PRINCIPAL =================== -->
     <div id="app-layout" role="application" aria-label="Dashboard Sistema RFID">
 
+        <!-- Overlay oscuro para cerrar sidebar en móvil -->
+        <div id="sidebar-overlay" class="sidebar-overlay" onclick="cerrarSidebar()" aria-hidden="true"></div>
+
         <!-- SIDEBAR -->
-        <nav class="sidebar" aria-label="Navegacion principal">
+        <nav class="sidebar" id="sidebar" aria-label="Navegacion principal">
             <div class="brand">
+                <!-- Botón cerrar sidebar en móvil -->
+                <button id="btn-close-sidebar" class="btn-sidebar-close" onclick="cerrarSidebar()"
+                    aria-label="Cerrar menú">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20"
+                        aria-hidden="true">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
                 <div class="brand-icon" aria-hidden="true">
                     <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="2" y="2" width="36" height="36" rx="8" stroke="currentColor" stroke-width="1.5" />
@@ -196,6 +208,15 @@
             <section id="vista-monitoreo" class="view-section active" aria-label="Monitoreo en Vivo">
                 <div class="top-header">
                     <div class="header-left">
+                        <button id="btn-hamburger-monitoreo" class="btn-hamburger" onclick="abrirSidebar()"
+                            aria-label="Abrir menú de navegación" aria-expanded="false">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20"
+                                height="20" aria-hidden="true">
+                                <line x1="3" y1="6" x2="21" y2="6" />
+                                <line x1="3" y1="12" x2="21" y2="12" />
+                                <line x1="3" y1="18" x2="21" y2="18" />
+                            </svg>
+                        </button>
                         <h2>Terminal Central FET</h2>
                         <p class="header-sub" id="estado-puerto">
                             <span class="dot-live" aria-hidden="true"></span>
@@ -275,7 +296,7 @@
                     <div class="table-header">
                         <h3>
                             <span class="dot-live" aria-hidden="true"></span>
-                            Registro de Ingreso en Tiempo Real
+                            Registro de Ingreso y Salida
                         </h3>
                         <span class="table-count" id="table-count" aria-live="polite">0 registros</span>
                     </div>
@@ -306,6 +327,15 @@
             <section id="vista-estudiantes" class="view-section" aria-label="Base Estudiantil">
                 <div class="top-header">
                     <div class="header-left">
+                        <button id="btn-hamburger-estudiantes" class="btn-hamburger" onclick="abrirSidebar()"
+                            aria-label="Abrir menú de navegación" aria-expanded="false">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20"
+                                height="20" aria-hidden="true">
+                                <line x1="3" y1="6" x2="21" y2="6" />
+                                <line x1="3" y1="12" x2="21" y2="12" />
+                                <line x1="3" y1="18" x2="21" y2="18" />
+                            </svg>
+                        </button>
                         <h2>Gestion de Credenciales</h2>
                         <p class="header-sub">Base de datos de tarjetas RFID asignadas</p>
                     </div>
@@ -361,6 +391,15 @@
             <section id="vista-reportes" class="view-section" aria-label="Reportes de Aforo">
                 <div class="top-header">
                     <div class="header-left">
+                        <button id="btn-hamburger-reportes" class="btn-hamburger" onclick="abrirSidebar()"
+                            aria-label="Abrir menú de navegación" aria-expanded="false">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20"
+                                height="20" aria-hidden="true">
+                                <line x1="3" y1="6" x2="21" y2="6" />
+                                <line x1="3" y1="12" x2="21" y2="12" />
+                                <line x1="3" y1="18" x2="21" y2="18" />
+                            </svg>
+                        </button>
                         <h2>Analisis y Reportes</h2>
                         <p class="header-sub">Historial de sesion y metricas de rendimiento</p>
                     </div>
@@ -490,6 +529,15 @@
             <section id="vista-configuracion" class="view-section" aria-label="Configuracion del Sistema">
                 <div class="top-header">
                     <div class="header-left">
+                        <button id="btn-hamburger-configuracion" class="btn-hamburger" onclick="abrirSidebar()"
+                            aria-label="Abrir menú de navegación" aria-expanded="false">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20"
+                                height="20" aria-hidden="true">
+                                <line x1="3" y1="6" x2="21" y2="6" />
+                                <line x1="3" y1="12" x2="21" y2="12" />
+                                <line x1="3" y1="18" x2="21" y2="18" />
+                            </svg>
+                        </button>
                         <h2>Parametros del Sistema</h2>
                         <p class="header-sub">Configuracion de hardware, aforo y licencia</p>
                     </div>

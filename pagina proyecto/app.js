@@ -669,7 +669,9 @@ function sincronizarReportes() {
     sinHist.style.display = 'none';
 
     historialCompleto.forEach(reg => {
-        const badgeClass = reg.estado === 'AUTORIZADO' ? 'badge ok' : 'badge warn';
+        const badgeClass = (reg.estado === 'INGRESO' || reg.estado === 'AUTORIZADO') ? 'badge ok'
+                         : reg.estado === 'SALIDA' ? 'badge salida'
+                         : 'badge warn';
         const idEnmascarado = enmascararId(reg.id);
         const tr = document.createElement('tr');
         tr.innerHTML = `

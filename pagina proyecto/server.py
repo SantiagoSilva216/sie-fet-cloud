@@ -7,6 +7,8 @@ import mysql.connector
 app = Flask(__name__)
 # CORS: permite peticiones desde Vercel, ESP32 y desarrollo local
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+# Nota: en produccion puedes restringir a tu URL exacta de Vercel:
+# CORS(app, origins=['https://tu-proyecto.vercel.app'])
 
 # Buscar certificado SSL del sistema (necesario para TiDB Cloud en Render)
 ssl_ca_path = '/etc/ssl/certs/ca-certificates.crt'
@@ -34,6 +36,11 @@ if ssl_ca_path:
 def get_db_connection():
     return mysql.connector.connect(**db_config)
 
+# Segundos durante los cuales se ignoran lecturas repetidas del MISMO tag.
+# Evita que una sola pasada de tarjeta (que el lector puede leer varias veces)
+# registre INGRESO y SALIDA inmediatamente.
+ANTIREBOTE_SEGUNDOS = 5
+
 
 # 1. ENDPOINT PARA RECIBIR ESCANEOS RFID (Desde el ESP32 o Simulación Web)
 @app.route('/api/rfid-scan', methods=['POST'])
@@ -47,6 +54,23 @@ def rfid_scan():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
+    # Anti-rebote: si este mismo tag se leyo hace muy poco, no se registra de nuevo
+    cursor.execute(
+        """SELECT estado, TIMESTAMPDIFF(SECOND, fecha_hora, NOW()) AS seg
+           FROM registros_acceso WHERE rfid_tag = %s ORDER BY id DESC LIMIT 1""",
+        (rfid_tag,)
+    )
+    ultimo = cursor.fetchone()
+    if ultimo and ultimo['seg'] is not None and ultimo['seg'] < ANTIREBOTE_SEGUNDOS:
+        cursor.close()
+        conn.close()
+        return jsonify({
+            'idEstudiante': None,
+            'codigoRfid':   rfid_tag,
+            'estadoStr':    ultimo['estado'],
+            'ignorado':     True
+        })
+
     # Buscar si el tag pertenece a un estudiante activo
     cursor.execute("SELECT * FROM estudiantes WHERE rfid_tag = %s AND estado = 'ACTIVO'", (rfid_tag,))
     estudiante = cursor.fetchone()
@@ -56,12 +80,15 @@ def rfid_scan():
         estudiante_id  = estudiante['id']
 
         # Logica Ingreso / Salida: el campo 'dentro' indica presencia actual
+        # 0 = afuera (siguiente scan = INGRESO), 1 = adentro (siguiente scan = SALIDA)
         esta_dentro = bool(estudiante.get('dentro', 0))
 
         if esta_dentro:
+            # Ya estaba adentro → registrar SALIDA y marcarlo como afuera
             estado_registro = 'SALIDA'
             nuevo_dentro    = 0
         else:
+            # Estaba afuera → registrar INGRESO y marcarlo como adentro
             estado_registro = 'INGRESO'
             nuevo_dentro    = 1
 
@@ -71,6 +98,7 @@ def rfid_scan():
             (nuevo_dentro, estudiante_id)
         )
     else:
+        # Tag no registrado o estudiante suspendido
         estado_registro = 'DENEGADO'
         doc_estudiante  = '0000'
         estudiante_id   = None
@@ -91,13 +119,15 @@ def rfid_scan():
     })
 
 
-# 2. ENDPOINT PARA OBTENER LOS ÚLTIMOS 5 REGISTROS
+# 2. ENDPOINT PARA OBTENER LOS ÚLTIMOS 5 REGISTROS (Para Monitoreo en Vivo en el Frontend)
 @app.route('/api/ultimos-registros', methods=['GET'])
 def ultimos_registros():
     from datetime import timedelta
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
+    # Se trae fecha_hora como objeto datetime (sin DATE_FORMAT) para poder
+    # ajustar la zona horaria en Python: Render corre en UTC, Colombia = UTC-5
     query = """
         SELECT r.id,
                r.fecha_hora,
@@ -114,6 +144,7 @@ def ultimos_registros():
     cursor.close()
     conn.close()
 
+    # Ajustar zona horaria UTC → Colombia (UTC-5) y formatear como dd/mm/yyyy HH:MM:SS
     bogota = timedelta(hours=-5)
     for reg in registros:
         dt = reg.get('fecha_hora')
@@ -125,13 +156,14 @@ def ultimos_registros():
                 reg['fecha_hora'] = str(dt)
         else:
             reg['fecha_hora'] = ''
+        # Asegurar que nombre_estudiante sea string o None
         if reg.get('nombre_estudiante') is None:
             reg['nombre_estudiante'] = None
 
     return jsonify(registros)
 
 
-# 3. ENDPOINT PARA OBTENER ESTUDIANTES
+# 3. ENDPOINT PARA OBTENER ESTUDIANTES (Vista Estudiantes)
 @app.route('/api/estudiantes', methods=['GET'])
 def obtener_estudiantes():
     conn = get_db_connection()
@@ -146,28 +178,35 @@ def obtener_estudiantes():
     return jsonify(estudiantes)
 
 
-# 4. ENDPOINT PARA CONTADORES Y ESTADÍSTICAS
+# 4. ENDPOINT PARA CONTADORES Y ESTADÍSTICAS (Aforo, Ingresos y Alertas)
 @app.route('/api/stats', methods=['GET'])
 def obtener_estadisticas():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
+    # Ingresos totales (INGRESO + AUTORIZADO legacy para compatibilidad)
     cursor.execute("""
         SELECT COUNT(*) AS total FROM registros_acceso
         WHERE estado IN ('INGRESO', 'AUTORIZADO')
     """)
     ingresos = cursor.fetchone()['total']
 
+    # Salidas totales
     cursor.execute("SELECT COUNT(*) AS total FROM registros_acceso WHERE estado = 'SALIDA'")
     salidas = cursor.fetchone()['total']
 
+    # Alertas (accesos denegados)
     cursor.execute("SELECT COUNT(*) AS total FROM registros_acceso WHERE estado = 'DENEGADO'")
     alertas = cursor.fetchone()['total']
 
+    # Aforo real = estudiantes marcados como presentes (campo 'dentro').
+    # Antes se calculaba como ingresos - salidas, lo que se desincronizaba
+    # al suspender/reactivar tarjetas o al limpiar el historial.
+    cursor.execute("SELECT COUNT(*) AS total FROM estudiantes WHERE dentro = 1")
+    aforo_neto = cursor.fetchone()['total']
+
     cursor.close()
     conn.close()
-
-    aforo_neto = max(0, ingresos - salidas)
 
     return jsonify({
         'aforo':    aforo_neto,
@@ -199,19 +238,24 @@ def agregar_estudiante():
         return jsonify({'error': str(err)}), 400
 
 
-# 6. ENDPOINT PARA CAMBIAR ESTADO DE UN ESTUDIANTE
+# 6. ENDPOINT PARA CAMBIAR ESTADO DE UN ESTUDIANTE (SUSPENDER/REACTIVAR)
 @app.route('/api/estudiantes/estado', methods=['PUT'])
 def cambiar_estado_estudiante():
     data = request.json
     rfid_tag = data.get('rfid_tag')
-    nuevo_estado = data.get('estado')
+    nuevo_estado = data.get('estado')  # 'ACTIVO' o 'INACTIVO'
 
     if not rfid_tag or not nuevo_estado:
         return jsonify({'error': 'Parámetros incompletos'}), 400
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE estudiantes SET estado = %s WHERE rfid_tag = %s", (nuevo_estado, rfid_tag))
+    # Al suspender o reactivar se reinicia la presencia (dentro = 0):
+    # el siguiente escaneo valido de esa tarjeta sera siempre un INGRESO.
+    cursor.execute(
+        "UPDATE estudiantes SET estado = %s, dentro = 0 WHERE rfid_tag = %s",
+        (nuevo_estado, rfid_tag)
+    )
     conn.commit()
     cursor.close()
     conn.close()
@@ -229,6 +273,7 @@ def login():
     usuario_input = data.get('usuario').strip()
     clave_input = data.get('clave')
 
+    # Generación de hash SHA-256 para la contraseña ingresada
     clave_hash = hashlib.sha256(clave_input.encode('utf-8')).hexdigest()
 
     try:
@@ -265,6 +310,8 @@ def eliminar_registros():
         cursor = conn.cursor()
         cursor.execute("DELETE FROM registros_acceso")
         filas_eliminadas = cursor.rowcount
+        # Sin historial nadie figura adentro: reiniciar presencia de todos
+        cursor.execute("UPDATE estudiantes SET dentro = 0")
         conn.commit()
         cursor.close()
         conn.close()
@@ -273,13 +320,15 @@ def eliminar_registros():
         return jsonify({'error': str(err)}), 500
 
 
-# 9. ENDPOINT PARA ELIMINAR UN ESTUDIANTE Y SUS REGISTROS
+
+# 9. ENDPOINT PARA ELIMINAR UN ESTUDIANTE Y SUS REGISTROS DE ACCESO
 @app.route('/api/estudiantes/<rfid_tag>', methods=['DELETE'])
 def eliminar_estudiante(rfid_tag):
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
+        # Verificar que el estudiante existe
         cursor.execute("SELECT id, nombre FROM estudiantes WHERE rfid_tag = %s", (rfid_tag,))
         estudiante = cursor.fetchone()
         if not estudiante:
@@ -287,9 +336,11 @@ def eliminar_estudiante(rfid_tag):
             conn.close()
             return jsonify({'error': 'Estudiante no encontrado'}), 404
 
+        # Eliminar sus registros de acceso primero (integridad referencial)
         cursor.execute("DELETE FROM registros_acceso WHERE estudiante_id = %s", (estudiante['id'],))
         registros_eliminados = cursor.rowcount
 
+        # Eliminar el estudiante
         cursor.execute("DELETE FROM estudiantes WHERE rfid_tag = %s", (rfid_tag,))
         conn.commit()
         cursor.close()
@@ -304,5 +355,7 @@ def eliminar_estudiante(rfid_tag):
 
 
 if __name__ == '__main__':
+
     port = int(os.environ.get('PORT', 5000))
+    # debug=False en produccion (Render)
     app.run(host='0.0.0.0', port=port, debug=os.environ.get('FLASK_DEBUG', 'false').lower() == 'true')

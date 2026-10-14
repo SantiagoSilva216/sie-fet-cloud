@@ -56,8 +56,10 @@ def rfid_scan():
 
     # Anti-rebote: si este mismo tag se leyo hace muy poco, no se registra de nuevo
     cursor.execute(
-        """SELECT estado, TIMESTAMPDIFF(SECOND, fecha_hora, NOW()) AS seg
-           FROM registros_acceso WHERE rfid_tag = %s ORDER BY id DESC LIMIT 1""",
+        """SELECT r.estado, e.nombre, TIMESTAMPDIFF(SECOND, r.fecha_hora, NOW()) AS seg
+           FROM registros_acceso r
+           LEFT JOIN estudiantes e ON r.estudiante_id = e.id
+           WHERE r.rfid_tag = %s ORDER BY r.id DESC LIMIT 1""",
         (rfid_tag,)
     )
     ultimo = cursor.fetchone()
@@ -68,6 +70,7 @@ def rfid_scan():
             'idEstudiante': None,
             'codigoRfid':   rfid_tag,
             'estadoStr':    ultimo['estado'],
+            'nombre':       ultimo.get('nombre') or 'No registrado',
             'ignorado':     True
         })
 
@@ -76,8 +79,9 @@ def rfid_scan():
     estudiante = cursor.fetchone()
 
     if estudiante:
-        doc_estudiante = estudiante['documento']
-        estudiante_id  = estudiante['id']
+        doc_estudiante    = estudiante['documento']
+        estudiante_id     = estudiante['id']
+        nombre_estudiante = estudiante['nombre']  # <-- 1. Extraemos el nombre de la BD
 
         # Logica Ingreso / Salida: el campo 'dentro' indica presencia actual
         # 0 = afuera (siguiente scan = INGRESO), 1 = adentro (siguiente scan = SALIDA)
@@ -99,9 +103,10 @@ def rfid_scan():
         )
     else:
         # Tag no registrado o estudiante suspendido
-        estado_registro = 'DENEGADO'
-        doc_estudiante  = '0000'
-        estudiante_id   = None
+        estado_registro   = 'DENEGADO'
+        doc_estudiante    = '0000'
+        estudiante_id     = None
+        nombre_estudiante = 'No registrado'       # <-- 2. Texto cuando no está activo/registrado
 
     # Registrar el evento en el historial
     cursor.execute(
@@ -115,9 +120,9 @@ def rfid_scan():
     return jsonify({
         'idEstudiante': doc_estudiante,
         'codigoRfid':   rfid_tag,
-        'estadoStr':    estado_registro
+        'estadoStr':    estado_registro,
+        'nombre':       nombre_estudiante         # <-- 3. Lo enviamos al ESP32
     })
-
 
 # 2. ENDPOINT PARA OBTENER LOS ÚLTIMOS 5 REGISTROS (Para Monitoreo en Vivo en el Frontend)
 @app.route('/api/ultimos-registros', methods=['GET'])

@@ -9,7 +9,6 @@ from functools import wraps
 from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
-from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 import mysql.connector
 
@@ -33,8 +32,6 @@ def _requerida(nombre):
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024  # 16 KB: las peticiones son JSON pequeños
-# Render y Vercel están detrás de un proxy: así request.remote_addr es la IP real del cliente
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 
 SECRET_KEY = _requerida('SECRET_KEY')
 DEVICE_API_KEY = _requerida('DEVICE_API_KEY')
@@ -101,6 +98,15 @@ def db(dictionary=True):
         conn.close()
 
 
+def client_ip():
+    """IP real de quien hace la petición. Render usa Cloudflare, que la envía en estas
+    cabeceras (Cloudflare las sobrescribe, no se pueden falsificar desde fuera).
+    En local, sin proxy, se usa la IP de la conexión."""
+    return (request.headers.get('CF-Connecting-IP')
+            or request.headers.get('True-Client-IP')
+            or request.remote_addr or '')[:45]
+
+
 def enmascarar(documento):
     """El documento completo nunca sale del servidor: ***4589."""
     s = str(documento or '0000')
@@ -118,7 +124,7 @@ def auditar(usuario, accion, detalle=''):
         with db(False) as (_, cur):
             cur.execute(
                 "INSERT INTO auditoria (usuario, accion, detalle, ip) VALUES (%s, %s, %s, %s)",
-                (usuario, accion, str(detalle)[:255], request.remote_addr))
+                (usuario, accion, str(detalle)[:255], client_ip()))
     except mysql.connector.Error:
         app.logger.exception('No se pudo escribir en la auditoría')
 
@@ -412,12 +418,14 @@ def login():
         return jsonify({'error': 'Usuario y clave requeridos'}), 400
 
     with db() as (_, cursor):
-        # Bloqueo temporal tras demasiados intentos fallidos (por IP o por usuario)
+        # Bloqueo temporal SOLO de la conexión (IP) que acumula intentos fallidos.
+        # No se bloquea el usuario: así nadie puede dejar fuera al administrador real
+        # escribiendo mal su clave, y los demás usuarios no se ven afectados.
         cursor.execute(
             """SELECT COUNT(*) AS n FROM auditoria
-               WHERE accion = 'LOGIN_FALLIDO' AND fecha_hora > NOW() - INTERVAL %s MINUTE
-                 AND (ip = %s OR usuario = %s)""",
-            (BLOQUEO_MINUTOS, request.remote_addr, usuario_input))
+               WHERE accion = 'LOGIN_FALLIDO' AND ip = %s
+                 AND fecha_hora > NOW() - INTERVAL %s MINUTE""",
+            (client_ip(), BLOQUEO_MINUTOS))
         if cursor.fetchone()['n'] >= BLOQUEO_INTENTOS:
             return jsonify({'error': f'Demasiados intentos. Espere {BLOQUEO_MINUTOS} minutos.'}), 429
 

@@ -8,6 +8,30 @@
 // ── URL del backend en Render (TiDB Cloud + Flask) ──
 const API_BASE = 'https://sistema-fet-backend.onrender.com';
 
+// ── Seguridad: token de sesión SOLO en memoria (no se guarda en el navegador) ──
+let authToken = null;
+
+/** Escapa texto antes de insertarlo con innerHTML (evita XSS). */
+function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/** fetch que adjunta el token y cierra la sesión si el servidor responde 401. */
+function apiFetch(path, opts = {}) {
+    const headers = Object.assign({}, opts.headers || {});
+    if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+    return fetch(API_BASE + path, Object.assign({}, opts, { headers })).then(res => {
+        if (res.status === 401 && authToken) sesionExpirada();
+        return res;
+    });
+}
+
+function sesionExpirada() {
+    authToken = null;
+    salirSistema();
+    mostrarToast('Su sesión expiró. Inicie sesión de nuevo.', 'danger');
+}
+
 // ── Aplicar tema guardado ANTES del primer render (evita flash) ──
 (function aplicarTemaGuardado() {
     const temaGuardado = localStorage.getItem('fet-theme') || 'dark';
@@ -56,6 +80,7 @@ function entrarSistema(e) {
     .then(res => res.json().then(data => ({ status: res.status, data })))
     .then(({ status, data }) => {
         if (status === 200 && data.usuario) {
+            authToken = data.token;
             // Login exitoso
             const nombreSidebar = document.getElementById('sidebar-username');
             if (nombreSidebar) {
@@ -98,6 +123,7 @@ function shakeLogin() {
 }
 
 function salirSistema() {
+    authToken = null;
     // Detener polling
     if (pollingInterval) {
         clearInterval(pollingInterval);
@@ -199,7 +225,7 @@ function iniciarMonitor() {
  * Consulta GET /api/stats para obtener aforo, ingresos y alertas
  */
 function cargarEstadisticas() {
-    fetch(API_BASE + '/api/stats')
+    apiFetch('/api/stats')
     .then(res => res.json())
     .then(data => {
         const aforoEl   = document.getElementById('aforo');
@@ -231,7 +257,7 @@ function cargarEstadisticas() {
  */
 function cargarUltimosRegistros() {
     if (monitorPausado) return;
-    fetch(API_BASE + '/api/ultimos-registros')
+    apiFetch('/api/ultimos-registros')
     .then(res => res.json())
     .then(registrosRaw => {
         // ── NOTIFICACIONES DE INGRESO / SALIDA ──
@@ -290,10 +316,10 @@ function cargarUltimosRegistros() {
             tr.className = 'new-row';
             tr.dataset.recordId = reg.id || 0;
             tr.innerHTML = `
-                <td style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:.85rem;">${hora}</td>
+                <td style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:.85rem;">${esc(hora)}</td>
                 <td style="font-family:'JetBrains Mono',monospace;letter-spacing:1px;color:var(--text-sub);">${idEnmascarado}</td>
-                <td class="rfid-tag">${reg.rfid_tag || ''}</td>
-                <td><span class="${badgeClass}">${reg.estado}</span></td>
+                <td class="rfid-tag">${esc(reg.rfid_tag || '')}</td>
+                <td><span class="${badgeClass}">${esc(reg.estado)}</span></td>
             `;
             tabla.appendChild(tr);
         });
@@ -351,7 +377,8 @@ function mostrarToastEvento(mensaje, tipo) {
     };
 
     const claseToast = tipo === 'salida' ? 'toast-salida' : `toast-${tipo}`;
-    toast.innerHTML  = (iconos[tipo] || iconos.danger) + `<span style="font-size:1rem;font-weight:600;">${mensaje}</span>`;
+    toast.innerHTML  = (iconos[tipo] || iconos.danger) + `<span class="toast-msg" style="font-size:1rem;font-weight:600;"></span>`;
+    toast.querySelector('.toast-msg').textContent = mensaje;
     toast.className  = `toast ${claseToast} visible toast-evento`;
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => toast.classList.remove('visible'), 5500);
@@ -375,7 +402,7 @@ function limpiarRegistros() {
     const btn = document.getElementById('btn-limpiar');
     if (btn) btn.disabled = true;
 
-    fetch(API_BASE + '/api/registros', { method: 'DELETE' })
+    apiFetch('/api/registros', { method: 'DELETE' })
     .then(res => res.json().then(data => ({ status: res.status, data })))
     .then(({ status, data }) => {
         if (status === 200) {
@@ -445,7 +472,7 @@ function animarContador(el) {
 
 function actualizarEstadoPuerto() {
     const el = document.getElementById('estado-puerto');
-    if (el) el.innerHTML = `<span class="dot-live"></span> Escuchando puerto ${puertoActual}...`;
+    if (el) el.innerHTML = `<span class="dot-live"></span> Escuchando lecturas del lector RFID (WiFi)...`;
 }
 
 // ============================================================
@@ -454,6 +481,7 @@ function actualizarEstadoPuerto() {
 
 function abrirModalAsignar() {
     document.getElementById('modal-overlay').classList.add('visible');
+    document.getElementById('modal-autorizacion').checked = false;
     setTimeout(() => document.getElementById('modal-documento').focus(), 150);
 }
 
@@ -477,19 +505,26 @@ function guardarEstudiante(e) {
     const carrera   = document.getElementById('modal-carrera').value.trim();
     const tag       = document.getElementById('modal-tag').value.trim().toUpperCase();
 
+    const autorizacion = document.getElementById('modal-autorizacion').checked;
+    if (!autorizacion) {
+        mostrarToast('Confirme la autorización del titular para el tratamiento de datos.', 'danger');
+        return;
+    }
+
     if (!documento || !nombre || !carrera || !tag) {
         mostrarToast('Complete todos los campos.', 'danger');
         return;
     }
 
-    fetch(API_BASE + '/api/estudiantes', {
+    apiFetch('/api/estudiantes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             documento: documento,
             nombre: nombre,
             carrera: carrera,
-            rfid_tag: tag
+            rfid_tag: tag,
+            autorizacion: autorizacion
         })
     })
     .then(res => res.json().then(data => ({ status: res.status, data })))
@@ -512,7 +547,7 @@ function guardarEstudiante(e) {
  * Carga la lista de estudiantes desde GET /api/estudiantes
  */
 function cargarEstudiantesDesdeAPI(filtro) {
-    fetch(API_BASE + '/api/estudiantes')
+    apiFetch('/api/estudiantes')
     .then(res => res.json())
     .then(data => {
         renderizarEstudiantes(data, filtro);
@@ -551,13 +586,13 @@ function renderizarEstudiantes(lista, filtro) {
         // Escapar el nombre para usarlo en el atributo data sin romper el HTML
         const nombreEscapado = (est.nombre || '').replace(/'/g, "\\'");
         tr.innerHTML = `
-            <td style="font-weight:500;color:var(--text-main);">${est.nombre}</td>
-            <td style="color:var(--text-muted);">${est.carrera}</td>
-            <td class="rfid-tag">${est.rfid_tag}</td>
-            <td><span class="badge ${activo ? 'ok' : 'warn'}">${est.estado}</span></td>
+            <td style="font-weight:500;color:var(--text-main);">${esc(est.nombre)}</td>
+            <td style="color:var(--text-muted);">${esc(est.carrera)}</td>
+            <td class="rfid-tag">${esc(est.rfid_tag)}</td>
+            <td><span class="badge ${activo ? 'ok' : 'warn'}">${esc(est.estado)}</span></td>
             <td class="td-acciones">
-                <button class="btn-table-action" onclick="toggleEstado(this, '${est.rfid_tag}', '${est.estado}')">${activo ? 'Suspender' : 'Reactivar'}</button>
-                <button class="btn-table-action btn-table-delete" onclick="eliminarEstudiante('${est.rfid_tag}', '${nombreEscapado}')" aria-label="Eliminar estudiante ${est.nombre}" title="Eliminar estudiante">
+                <button class="btn-table-action" data-tag="${esc(est.rfid_tag)}" data-estado="${esc(est.estado)}" onclick="toggleEstado(this, this.dataset.tag, this.dataset.estado)">${activo ? 'Suspender' : 'Reactivar'}</button>
+                <button class="btn-table-action btn-table-delete" data-tag="${esc(est.rfid_tag)}" data-nombre="${esc(est.nombre)}" onclick="eliminarEstudiante(this.dataset.tag, this.dataset.nombre)" aria-label="Eliminar estudiante ${esc(est.nombre)}" title="Eliminar estudiante">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" aria-hidden="true">
                         <polyline points="3 6 5 6 21 6"/>
                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
@@ -581,7 +616,7 @@ function filtrarEstudiantes() {
 function toggleEstado(btn, rfidTag, estadoActual) {
     const nuevoEstado = estadoActual === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO';
 
-    fetch(API_BASE + '/api/estudiantes/estado', {
+    apiFetch('/api/estudiantes/estado', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rfid_tag: rfidTag, estado: nuevoEstado })
@@ -621,7 +656,7 @@ function eliminarEstudiante(rfidTag, nombre) {
     );
     if (!confirmado) return;
 
-    fetch(`${API_BASE}/api/estudiantes/${encodeURIComponent(rfidTag)}`, {
+    apiFetch(`/api/estudiantes/${encodeURIComponent(rfidTag)}`, {
         method: 'DELETE'
     })
     .then(res => res.json().then(data => ({ status: res.status, data })))
@@ -648,7 +683,7 @@ function eliminarEstudiante(rfidTag, nombre) {
 
 function sincronizarReportes() {
     // Traer stats actuales del backend
-    fetch(API_BASE + '/api/stats')
+    apiFetch('/api/stats')
     .then(res => res.json())
     .then(data => {
         document.getElementById('reporte-ingresos').innerText = (data.ingresos || 0).toLocaleString();
@@ -675,10 +710,10 @@ function sincronizarReportes() {
         const idEnmascarado = enmascararId(reg.id);
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td style="font-family:'JetBrains Mono',monospace;font-size:.85rem;color:var(--text-muted);">${reg.hora}</td>
+            <td style="font-family:'JetBrains Mono',monospace;font-size:.85rem;color:var(--text-muted);">${esc(reg.hora)}</td>
             <td style="font-family:'JetBrains Mono',monospace;letter-spacing:1px;">${idEnmascarado}</td>
-            <td class="rfid-tag">${reg.tag}</td>
-            <td><span class="${badgeClass}">${reg.estado}</span></td>
+            <td class="rfid-tag">${esc(reg.tag)}</td>
+            <td><span class="${badgeClass}">${esc(reg.estado)}</span></td>
         `;
         tbody.appendChild(tr);
     });
@@ -763,7 +798,8 @@ function mostrarToast(mensaje, tipo = 'ok') {
         ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18" style="flex-shrink:0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`
         : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
 
-    toast.innerHTML = icono + `<span>${mensaje}</span>`;
+    toast.innerHTML = icono + '<span class="toast-msg"></span>';
+    toast.querySelector('.toast-msg').textContent = mensaje;
     toast.className = `toast toast-${tipo} visible`;
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => toast.classList.remove('visible'), 3800);

@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
     <title>FET | Sistema de Ingreso Estudiantil RFID</title>
     <meta name="description"
         content="Sistema de Identificación Estudiantil FET con tecnología RFID para control de acceso y aforo en tiempo real. Fundación Escuela Tecnológica de Neiva.">
@@ -72,8 +73,19 @@
                     aria-hidden="true">
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                 </svg>
-                Protegido bajo Ley 1581 de 2012 &middot; Habeas Data
+                Datos personales tratados conforme a la Ley 1581 de 2012 &middot; Habeas Data
             </p>
+            <details class="login-legal" style="margin-top:8px;text-align:left;">
+                <summary style="cursor:pointer;">Aviso de privacidad</summary>
+                <p style="margin-top:6px;font-size:.78rem;line-height:1.4;">
+                    La Fundación Escuela Tecnológica de Neiva «Jesús Oviedo Pérez» (FET) trata el documento, nombre,
+                    programa académico, código de tarjeta RFID y los registros de ingreso y salida de los estudiantes
+                    con la finalidad de controlar el acceso y el aforo del campus. Usted puede conocer, actualizar,
+                    rectificar y solicitar la supresión de sus datos, y revocar su autorización, escribiendo a
+                    [CORREO INSTITUCIONAL DE PROTECCIÓN DE DATOS]. Los registros de acceso se conservan por un
+                    máximo de [PLAZO DE RETENCIÓN]. Política completa: [ENLACE A LA POLÍTICA DE TRATAMIENTO DE DATOS].
+                </p>
+            </details>
         </div>
     </div>
 
@@ -712,6 +724,13 @@
                         <input id="modal-tag" type="text" class="input-dark" placeholder="FET-D3391" required
                             autocomplete="off" style="font-family: 'JetBrains Mono', monospace; letter-spacing:1px;">
                     </div>
+                </div>
+                <div class="input-group">
+                    <label for="modal-autorizacion" style="display:flex;gap:8px;align-items:flex-start;font-size:.8rem;line-height:1.35;">
+                        <input id="modal-autorizacion" type="checkbox" style="margin-top:3px;">
+                        <span>El titular autorizó de forma previa, expresa e informada a la FET el tratamiento de sus datos
+                            personales (documento, nombre, programa y registros de acceso) para el control de ingreso y aforo (Ley 1581 de 2012).</span>
+                    </label>
                 </div>
                 <button id="btn-guardar-estudiante" type="submit" class="btn-neon" style="margin-top: 8px;">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"

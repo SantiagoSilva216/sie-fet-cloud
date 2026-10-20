@@ -807,66 +807,158 @@ function purgarRegistrosAntiguos() {
 //  REPORTES
 // ============================================================
  
+let reporteActual = [];   // filas del ultimo historial consultado (para exportar)
+ 
+/** Fecha local de hoy en formato AAAA-MM-DD (para los filtros). */
+function hoyISO() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+ 
 function sincronizarReportes() {
-    // Traer stats actuales del backend
     apiFetch('/api/stats')
     .then(res => res.json())
     .then(data => {
-        document.getElementById('reporte-ingresos').innerText = (data.ingresos || 0).toLocaleString();
-        document.getElementById('reporte-alertas').innerText  = (data.alertas || 0).toLocaleString();
+        document.getElementById('reporte-ingresos').innerText = (data.ingresos_hoy ?? data.ingresos ?? 0).toLocaleString();
+        document.getElementById('reporte-alertas').innerText  = (data.alertas_hoy ?? data.alertas ?? 0).toLocaleString();
         document.getElementById('reporte-maximo').innerText   = aforoMaximo;
     })
     .catch(err => console.error('Error sincronizando reportes:', err));
  
-    // Tabla de historial desde los ultimos registros cargados
+    // Al abrir la vista se muestra el dia de hoy, salvo que ya haya filtros puestos
+    if (!document.getElementById('filtro-desde').value && !document.getElementById('filtro-hasta').value) {
+        document.getElementById('filtro-desde').value = hoyISO();
+        document.getElementById('filtro-hasta').value = hoyISO();
+    }
+    buscarRegistros();
+    cargarDentro();
+}
+ 
+function limpiarFiltros() {
+    document.getElementById('form-filtros').reset();
+    document.getElementById('filtro-desde').value = hoyISO();
+    document.getElementById('filtro-hasta').value = hoyISO();
+    buscarRegistros();
+}
+ 
+/**
+ * Consulta el historial filtrado via GET /api/reportes/registros
+ * (rango de fechas, franja horaria, estudiante y tipo de movimiento).
+ */
+function buscarRegistros(e) {
+    if (e) e.preventDefault();
+    const desde = document.getElementById('filtro-desde').value;
+    const hasta = document.getElementById('filtro-hasta').value;
+    if (desde && hasta && desde > hasta) {
+        mostrarToast('La fecha "Desde" no puede ser posterior a "Hasta".', 'danger');
+        return;
+    }
+    const params = new URLSearchParams();
+    const valores = {
+        desde, hasta,
+        hora_desde: document.getElementById('filtro-hora-desde').value,
+        hora_hasta: document.getElementById('filtro-hora-hasta').value,
+        q:          document.getElementById('filtro-texto').value.trim(),
+        estado:     document.getElementById('filtro-estado').value
+    };
+    Object.entries(valores).forEach(([k, v]) => { if (v) params.append(k, v); });
+ 
+    apiFetch('/api/reportes/registros?' + params.toString())
+    .then(leerJson)
+    .then(({ status, data }) => {
+        if (status !== 200) {
+            mostrarToast(data.error || 'Error al consultar el historial.', 'danger');
+            return;
+        }
+        reporteActual = data.registros || [];
+        renderizarHistorial(reporteActual);
+        if (data.truncado) mostrarToast(`Se muestran los primeros ${reporteActual.length} registros. Acote el rango de fechas.`, 'danger');
+    })
+    .catch(err => {
+        mostrarToast('Error de conexion al consultar el historial.', 'danger');
+        console.error('Error consultando historial:', err);
+    });
+}
+ 
+function renderizarHistorial(lista) {
     const tbody   = document.getElementById('tabla-historial');
     const sinHist = document.getElementById('sin-historial');
     tbody.innerHTML = '';
+    document.getElementById('historial-count').textContent = `${lista.length} registro${lista.length !== 1 ? 's' : ''}`;
+    sinHist.style.display = lista.length ? 'none' : 'flex';
  
-    if (historialCompleto.length === 0) {
-        sinHist.style.display = 'flex';
-        return;
-    }
-    sinHist.style.display = 'none';
- 
-    historialCompleto.forEach(reg => {
-        const badgeClass = (reg.estado === 'INGRESO' || reg.estado === 'AUTORIZADO') ? 'badge ok'
-                         : reg.estado === 'SALIDA' ? 'badge salida'
+    lista.forEach(reg => {
+        const badgeClass = reg.estado === 'INGRESO' ? 'badge ok'
+                         : reg.estado === 'SALIDA'  ? 'badge salida'
                          : 'badge warn';
-        const idEnmascarado = enmascararId(reg.id);
         const tr = document.createElement('tr');
         tr.innerHTML = `
+            <td style="font-family:'JetBrains Mono',monospace;font-size:.85rem;color:var(--text-muted);">${esc(reg.fecha)}</td>
             <td style="font-family:'JetBrains Mono',monospace;font-size:.85rem;color:var(--text-muted);">${esc(reg.hora)}</td>
-            <td style="font-family:'JetBrains Mono',monospace;letter-spacing:1px;">${idEnmascarado}</td>
-            <td class="rfid-tag">${esc(reg.tag)}</td>
+            <td style="font-weight:500;color:var(--text-main);">${esc(reg.nombre)}</td>
+            <td style="font-family:'JetBrains Mono',monospace;letter-spacing:1px;">${esc(reg.idEstudiante)}</td>
+            <td class="rfid-tag">${esc(reg.rfid_tag)}</td>
             <td><span class="${badgeClass}">${esc(reg.estado)}</span></td>
         `;
         tbody.appendChild(tr);
     });
 }
  
+/** Estudiantes con ingreso y sin salida registrada, via GET /api/reportes/dentro. */
+function cargarDentro() {
+    apiFetch('/api/reportes/dentro')
+    .then(res => res.json())
+    .then(lista => {
+        if (!Array.isArray(lista)) return;
+        const tbody = document.getElementById('tabla-dentro');
+        tbody.innerHTML = '';
+        document.getElementById('dentro-count').textContent = `${lista.length} estudiante${lista.length !== 1 ? 's' : ''}`;
+        document.getElementById('sin-dentro').style.display = lista.length ? 'none' : 'flex';
+        lista.forEach(est => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="font-weight:500;color:var(--text-main);">${esc(est.nombre)}</td>
+                <td style="color:var(--text-muted);">${esc(est.carrera)}</td>
+                <td style="font-family:'JetBrains Mono',monospace;letter-spacing:1px;">${esc(est.idEstudiante)}</td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:.85rem;color:var(--text-muted);">${esc(est.ultimo_ingreso)}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    })
+    .catch(err => console.error('Error cargando estudiantes dentro:', err));
+}
+ 
+/** Campo CSV seguro: comillas y sin formulas de Excel (=, +, -, @). */
+function campoCsv(v) {
+    let s = String(v ?? '');
+    if (/^[=+\-@]/.test(s)) s = "'" + s;
+    return '"' + s.replace(/"/g, '""') + '"';
+}
+ 
 /**
- * Genera y descarga un CSV con el historial.
+ * Genera y descarga un CSV con el historial filtrado que se ve en pantalla.
  */
 function exportarReporte() {
-    if (historialCompleto.length === 0) {
-        mostrarToast('No hay datos para exportar aun.', 'danger');
+    if (reporteActual.length === 0) {
+        mostrarToast('No hay datos para exportar. Consulte el historial primero.', 'danger');
         return;
     }
-    let csv = 'Hora,ID Estudiantil,Tag RFID,Estado\n';
-    historialCompleto.forEach(r => {
-        csv += `${r.hora},${enmascararId(r.id)},${r.tag},${r.estado}\n`;
+    let csv = 'Fecha,Hora,Estudiante,Carrera,ID Estudiantil,Tag RFID,Estado\n';
+    reporteActual.forEach(r => {
+        csv += [r.fecha, r.hora, r.nombre, r.carrera, r.idEstudiante, r.rfid_tag, r.estado].map(campoCsv).join(',') + '\n';
     });
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
-    a.download = `reporte_FET_${new Date().toLocaleDateString('es-CO').replace(/\//g, '-')}.csv`;
+    const desde = document.getElementById('filtro-desde').value || 'inicio';
+    const hasta = document.getElementById('filtro-hasta').value || hoyISO();
+    a.download = `reporte_FET_${desde}_a_${hasta}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    mostrarToast(`Reporte CSV descargado (${historialCompleto.length} registros).`, 'ok');
+    mostrarToast(`Reporte CSV descargado (${reporteActual.length} registros).`, 'ok');
 }
  
 // ============================================================
@@ -1000,3 +1092,4 @@ document.addEventListener('DOMContentLoaded', () => {
     const temaGuardado = localStorage.getItem('fet-theme') || 'dark';
     sincronizarIconoTema(temaGuardado);
 });
+ 

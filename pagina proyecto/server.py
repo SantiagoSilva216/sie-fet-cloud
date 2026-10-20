@@ -9,6 +9,7 @@ from functools import wraps
 from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 import mysql.connector
 
@@ -32,6 +33,8 @@ def _requerida(nombre):
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024  # 16 KB: las peticiones son JSON pequeños
+# Render y Vercel están detrás de un proxy: así request.remote_addr es la IP real del cliente
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 
 SECRET_KEY = _requerida('SECRET_KEY')
 DEVICE_API_KEY = _requerida('DEVICE_API_KEY')
@@ -78,6 +81,15 @@ RE_DOC = re.compile(r'^[0-9A-Za-z]{4,20}$')
 RE_HASH_LEGADO = re.compile(r'^[0-9a-f]{64}$')  # SHA-256 antiguo (sin sal)
 HASH_FICTICIO = generate_password_hash('contraseña-ficticia', method='pbkdf2:sha256')
 
+# Tag normalizado en la BD: sin espacios, ':' ni '-', y en MAYÚSCULAS.
+# TiDB compara texto distinguiendo mayúsculas (utf8mb4_bin), así que 'a3f2c1d4' != 'A3F2C1D4'.
+TAG_SQL = "UPPER(REPLACE(REPLACE(REPLACE(TRIM(rfid_tag), ' ', ''), ':', ''), '-', ''))"
+
+
+def normalizar_tag(valor):
+    """Deja el tag igual a como lo envía el ESP32: hexadecimal en mayúsculas, sin separadores."""
+    return re.sub(r'[\s:\-]', '', str(valor or '')).upper()
+
 
 # ------------------------------------------------------------
 #  Utilidades
@@ -98,15 +110,6 @@ def db(dictionary=True):
         conn.close()
 
 
-def client_ip():
-    """IP real de quien hace la petición. Render usa Cloudflare, que la envía en estas
-    cabeceras (Cloudflare las sobrescribe, no se pueden falsificar desde fuera).
-    En local, sin proxy, se usa la IP de la conexión."""
-    return (request.headers.get('CF-Connecting-IP')
-            or request.headers.get('True-Client-IP')
-            or request.remote_addr or '')[:45]
-
-
 def enmascarar(documento):
     """El documento completo nunca sale del servidor: ***4589."""
     s = str(documento or '0000')
@@ -124,7 +127,7 @@ def auditar(usuario, accion, detalle=''):
         with db(False) as (_, cur):
             cur.execute(
                 "INSERT INTO auditoria (usuario, accion, detalle, ip) VALUES (%s, %s, %s, %s)",
-                (usuario, accion, str(detalle)[:255], client_ip()))
+                (usuario, accion, str(detalle)[:255], request.remote_addr))
     except mysql.connector.Error:
         app.logger.exception('No se pudo escribir en la auditoría')
 
@@ -192,7 +195,7 @@ def demasiado_grande(_):
 @requiere_dispositivo
 def rfid_scan():
     data = request.get_json(silent=True) or {}
-    rfid_tag = str(data.get('rfid_tag', '')).strip().upper()
+    rfid_tag = normalizar_tag(data.get('rfid_tag', ''))
     if not RE_TAG.match(rfid_tag):
         return jsonify({'error': 'Tag RFID inválido'}), 400
 
@@ -213,10 +216,12 @@ def rfid_scan():
                 'ignorado': True
             })
 
-        cursor.execute("SELECT * FROM estudiantes WHERE rfid_tag = %s AND estado = 'ACTIVO'", (rfid_tag,))
+        # Se busca el tag SIN filtrar por estado, comparando ambos lados normalizados
+        cursor.execute(f"SELECT * FROM estudiantes WHERE {TAG_SQL} = %s", (rfid_tag,))
         estudiante = cursor.fetchone()
+        activo = bool(estudiante) and str(estudiante.get('estado') or '').strip().upper() == 'ACTIVO'
 
-        if estudiante:
+        if activo:
             estudiante_id = estudiante['id']
             doc = estudiante['documento']
             nombre = estudiante['nombre']
@@ -225,8 +230,13 @@ def rfid_scan():
             else:
                 estado_registro, nuevo_dentro = 'INGRESO', 1
             cursor.execute("UPDATE estudiantes SET dentro = %s WHERE id = %s", (nuevo_dentro, estudiante_id))
+        elif estudiante:
+            # Registrado pero desactivado: se deja el nombre para que el panel muestre "(suspendido)"
+            estado_registro, doc, estudiante_id, nombre = 'DENEGADO', estudiante['documento'], estudiante['id'], estudiante['nombre']
+            app.logger.info('Tag %s DENEGADO: estudiante inactivo (estado=%r)', rfid_tag, estudiante.get('estado'))
         else:
             estado_registro, doc, estudiante_id, nombre = 'DENEGADO', '0000', None, 'No registrado'
+            app.logger.info('Tag %s DENEGADO: no existe en la tabla estudiantes', rfid_tag)
 
         cursor.execute(
             "INSERT INTO registros_acceso (estudiante_id, rfid_tag, estado) VALUES (%s, %s, %s)",
@@ -304,7 +314,7 @@ def agregar_estudiante():
     documento = str(data.get('documento', '')).strip()
     nombre = data.get('nombre', '')
     carrera = data.get('carrera', '')
-    rfid_tag = str(data.get('rfid_tag', '')).strip().upper()
+    rfid_tag = normalizar_tag(data.get('rfid_tag', ''))
 
     if not (RE_DOC.match(documento) and texto_valido(nombre) and texto_valido(carrera) and RE_TAG.match(rfid_tag)):
         return jsonify({'error': 'Datos inválidos: revise documento, nombre, carrera y tag'}), 400
@@ -324,13 +334,13 @@ def agregar_estudiante():
 @requiere_auth(solo_admin=True)
 def cambiar_estado_estudiante():
     data = request.get_json(silent=True) or {}
-    rfid_tag = str(data.get('rfid_tag', '')).strip().upper()
+    rfid_tag = normalizar_tag(data.get('rfid_tag', ''))
     nuevo_estado = data.get('estado')
     if not RE_TAG.match(rfid_tag) or nuevo_estado not in ('ACTIVO', 'INACTIVO'):
         return jsonify({'error': 'Parámetros inválidos'}), 400
 
     with db() as (_, cursor):
-        cursor.execute("UPDATE estudiantes SET estado = %s, dentro = 0 WHERE rfid_tag = %s", (nuevo_estado, rfid_tag))
+        cursor.execute(f"UPDATE estudiantes SET estado = %s, dentro = 0 WHERE {TAG_SQL} = %s", (nuevo_estado, rfid_tag))
     auditar(g.usuario, 'ESTADO_CAMBIADO', f'tag={rfid_tag} estado={nuevo_estado}')
     return jsonify({'mensaje': f'Estado actualizado a {nuevo_estado}'})
 
@@ -339,7 +349,7 @@ def cambiar_estado_estudiante():
 @requiere_auth(solo_admin=True)
 def rectificar_estudiante(rfid_tag):
     """Derecho de actualización/rectificación del titular (Ley 1581)."""
-    rfid_tag = rfid_tag.strip().upper()
+    rfid_tag = normalizar_tag(rfid_tag)
     data = request.get_json(silent=True) or {}
     campos, valores = [], []
     if 'nombre' in data:
@@ -358,7 +368,7 @@ def rectificar_estudiante(rfid_tag):
         return jsonify({'error': 'Nada que actualizar'}), 400
 
     with db() as (_, cursor):
-        cursor.execute(f"UPDATE estudiantes SET {', '.join(campos)} WHERE rfid_tag = %s", (*valores, rfid_tag))
+        cursor.execute(f"UPDATE estudiantes SET {', '.join(campos)} WHERE {TAG_SQL} = %s", (*valores, rfid_tag))
     auditar(g.usuario, 'ESTUDIANTE_RECTIFICADO', f'tag={rfid_tag} campos={",".join(c.split(" ")[0] for c in campos)}')
     return jsonify({'mensaje': 'Datos actualizados'})
 
@@ -367,12 +377,12 @@ def rectificar_estudiante(rfid_tag):
 @requiere_auth(solo_admin=True)
 def consultar_datos_titular(rfid_tag):
     """Derecho de acceso/consulta: entrega TODOS los datos de un titular (documento completo)."""
-    rfid_tag = rfid_tag.strip().upper()
+    rfid_tag = normalizar_tag(rfid_tag)
     if not RE_TAG.match(rfid_tag):
         return jsonify({'error': 'Tag inválido'}), 400
     with db() as (_, cursor):
         cursor.execute("SELECT id, documento, nombre, carrera, rfid_tag, estado, autorizacion_datos, fecha_autorizacion "
-                       "FROM estudiantes WHERE rfid_tag = %s", (rfid_tag,))
+                       f"FROM estudiantes WHERE {TAG_SQL} = %s", (rfid_tag,))
         est = cursor.fetchone()
         if not est:
             return jsonify({'error': 'Estudiante no encontrado'}), 404
@@ -390,17 +400,17 @@ def consultar_datos_titular(rfid_tag):
 @requiere_auth(solo_admin=True)
 def eliminar_estudiante(rfid_tag):
     """Derecho de supresión: borra al estudiante y sus registros de acceso."""
-    rfid_tag = rfid_tag.strip().upper()
+    rfid_tag = normalizar_tag(rfid_tag)
     if not RE_TAG.match(rfid_tag):
         return jsonify({'error': 'Tag inválido'}), 400
     with db() as (_, cursor):
-        cursor.execute("SELECT id, nombre FROM estudiantes WHERE rfid_tag = %s", (rfid_tag,))
+        cursor.execute(f"SELECT id, nombre FROM estudiantes WHERE {TAG_SQL} = %s", (rfid_tag,))
         estudiante = cursor.fetchone()
         if not estudiante:
             return jsonify({'error': 'Estudiante no encontrado'}), 404
         cursor.execute("DELETE FROM registros_acceso WHERE estudiante_id = %s", (estudiante['id'],))
         eliminados = cursor.rowcount
-        cursor.execute("DELETE FROM estudiantes WHERE rfid_tag = %s", (rfid_tag,))
+        cursor.execute("DELETE FROM estudiantes WHERE id = %s", (estudiante['id'],))
     auditar(g.usuario, 'ESTUDIANTE_ELIMINADO', f'tag={rfid_tag} registros={eliminados}')
     return jsonify({'mensaje': f"Estudiante '{estudiante['nombre']}' eliminado correctamente",
                     'registros_acceso_eliminados': eliminados}), 200
@@ -418,14 +428,12 @@ def login():
         return jsonify({'error': 'Usuario y clave requeridos'}), 400
 
     with db() as (_, cursor):
-        # Bloqueo temporal SOLO de la conexión (IP) que acumula intentos fallidos.
-        # No se bloquea el usuario: así nadie puede dejar fuera al administrador real
-        # escribiendo mal su clave, y los demás usuarios no se ven afectados.
+        # Bloqueo temporal tras demasiados intentos fallidos (por IP o por usuario)
         cursor.execute(
             """SELECT COUNT(*) AS n FROM auditoria
-               WHERE accion = 'LOGIN_FALLIDO' AND ip = %s
-                 AND fecha_hora > NOW() - INTERVAL %s MINUTE""",
-            (client_ip(), BLOQUEO_MINUTOS))
+               WHERE accion = 'LOGIN_FALLIDO' AND fecha_hora > NOW() - INTERVAL %s MINUTE
+                 AND (ip = %s OR usuario = %s)""",
+            (BLOQUEO_MINUTOS, request.remote_addr, usuario_input))
         if cursor.fetchone()['n'] >= BLOQUEO_INTENTOS:
             return jsonify({'error': f'Demasiados intentos. Espere {BLOQUEO_MINUTOS} minutos.'}), 429
 

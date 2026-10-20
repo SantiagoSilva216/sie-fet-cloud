@@ -5,14 +5,14 @@ import hashlib
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import wraps
-
+ 
 from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 import mysql.connector
-
+ 
 # ============================================================
 #  S.I.E - FET  |  Backend Flask (versión con seguridad reforzada)
 #  Todas las credenciales y claves vienen de variables de entorno.
@@ -22,20 +22,20 @@ import mysql.connector
 #                          BLOQUEO_INTENTOS (5), BLOQUEO_MINUTOS (15),
 #                          RETENCION_DIAS (365), PORT, FLASK_DEBUG
 # ============================================================
-
-
+ 
+ 
 def _requerida(nombre):
     valor = os.getenv(nombre)
     if not valor:
         raise RuntimeError(f'Falta la variable de entorno obligatoria {nombre}')
     return valor
-
-
+ 
+ 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024  # 16 KB: las peticiones son JSON pequeños
 # Render y Vercel están detrás de un proxy: así request.remote_addr es la IP real del cliente
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
-
+ 
 SECRET_KEY = _requerida('SECRET_KEY')
 DEVICE_API_KEY = _requerida('DEVICE_API_KEY')
 TOKEN_HORAS = int(os.getenv('TOKEN_HORAS', '8'))
@@ -43,9 +43,9 @@ BLOQUEO_INTENTOS = int(os.getenv('BLOQUEO_INTENTOS', '5'))
 BLOQUEO_MINUTOS = int(os.getenv('BLOQUEO_MINUTOS', '15'))
 RETENCION_DIAS = int(os.getenv('RETENCION_DIAS', '365'))
 ROL_ADMIN = 'Administrador'
-
+ 
 serializer = URLSafeTimedSerializer(SECRET_KEY, salt='sie-fet-auth')
-
+ 
 # CORS restringido: solo el frontend autorizado (el ESP32 no usa CORS)
 ORIGENES = [o.strip() for o in os.getenv(
     'ALLOWED_ORIGINS', 'https://sie-fet-frontend.vercel.app').split(',') if o.strip()]
@@ -53,7 +53,7 @@ CORS(app,
      resources={r'/api/*': {'origins': ORIGENES}},
      allow_headers=['Content-Type', 'Authorization', 'X-Device-Key'],
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
-
+ 
 # Certificado SSL (necesario para TiDB Cloud)
 ssl_ca_path = '/etc/ssl/certs/ca-certificates.crt'
 if not os.path.exists(ssl_ca_path):
@@ -62,7 +62,7 @@ if not os.path.exists(ssl_ca_path):
         ssl_ca_path = certifi.where()
     except ImportError:
         ssl_ca_path = None
-
+ 
 db_config = {
     'host': _requerida('DB_HOST'),
     'user': _requerida('DB_USER'),
@@ -73,24 +73,24 @@ db_config = {
 if ssl_ca_path:
     db_config['ssl_ca'] = ssl_ca_path
     db_config['ssl_verify_cert'] = True
-
+ 
 ANTIREBOTE_SEGUNDOS = 5
-
+ 
 RE_TAG = re.compile(r'^[0-9A-Z-]{4,32}$')
 RE_DOC = re.compile(r'^[0-9A-Za-z]{4,20}$')
 RE_HASH_LEGADO = re.compile(r'^[0-9a-f]{64}$')  # SHA-256 antiguo (sin sal)
 HASH_FICTICIO = generate_password_hash('contraseña-ficticia', method='pbkdf2:sha256')
-
+ 
 # Tag normalizado en la BD: sin espacios, ':' ni '-', y en MAYÚSCULAS.
 # TiDB compara texto distinguiendo mayúsculas (utf8mb4_bin), así que 'a3f2c1d4' != 'A3F2C1D4'.
 TAG_SQL = "UPPER(REPLACE(REPLACE(REPLACE(TRIM(rfid_tag), ' ', ''), ':', ''), '-', ''))"
-
-
+ 
+ 
 def normalizar_tag(valor):
     """Deja el tag igual a como lo envía el ESP32: hexadecimal en mayúsculas, sin separadores."""
     return re.sub(r'[\s:\-]', '', str(valor or '')).upper()
-
-
+ 
+ 
 # ------------------------------------------------------------
 #  Utilidades
 # ------------------------------------------------------------
@@ -108,19 +108,19 @@ def db(dictionary=True):
     finally:
         cur.close()
         conn.close()
-
-
+ 
+ 
 def enmascarar(documento):
     """El documento completo nunca sale del servidor: ***4589."""
     s = str(documento or '0000')
     return '***' + s[-4:]
-
-
+ 
+ 
 def texto_valido(valor, minimo=2, maximo=100):
     return (isinstance(valor, str) and minimo <= len(valor.strip()) <= maximo
             and not re.search(r'[\x00-\x1f<>]', valor))
-
-
+ 
+ 
 def auditar(usuario, accion, detalle=''):
     """Bitácora de auditoría: quién hizo qué y cuándo (sin datos sensibles)."""
     try:
@@ -130,8 +130,8 @@ def auditar(usuario, accion, detalle=''):
                 (usuario, accion, str(detalle)[:255], request.remote_addr))
     except mysql.connector.Error:
         app.logger.exception('No se pudo escribir en la auditoría')
-
-
+ 
+ 
 def requiere_auth(solo_admin=False):
     def decorador(f):
         @wraps(f)
@@ -152,8 +152,8 @@ def requiere_auth(solo_admin=False):
             return f(*args, **kwargs)
         return envoltura
     return decorador
-
-
+ 
+ 
 def requiere_dispositivo(f):
     @wraps(f)
     def envoltura(*args, **kwargs):
@@ -163,8 +163,8 @@ def requiere_dispositivo(f):
             return jsonify({'error': 'Dispositivo no autorizado'}), 401
         return f(*args, **kwargs)
     return envoltura
-
-
+ 
+ 
 @app.after_request
 def cabeceras_seguridad(resp):
     resp.headers['X-Content-Type-Options'] = 'nosniff'
@@ -173,21 +173,21 @@ def cabeceras_seguridad(resp):
     if request.path.startswith('/api/'):
         resp.headers['Cache-Control'] = 'no-store'
     return resp
-
-
+ 
+ 
 @app.errorhandler(mysql.connector.Error)
 def error_bd(err):
     app.logger.exception('Error de base de datos')  # el detalle queda en el log, no en la respuesta
     if getattr(err, 'errno', None) == 1062:
         return jsonify({'error': 'El documento o el tag ya están registrados'}), 409
     return jsonify({'error': 'Error interno del servidor'}), 500
-
-
+ 
+ 
 @app.errorhandler(413)
 def demasiado_grande(_):
     return jsonify({'error': 'Petición demasiado grande'}), 413
-
-
+ 
+ 
 # ------------------------------------------------------------
 #  1. Escaneo RFID (solo dispositivos con X-Device-Key)
 # ------------------------------------------------------------
@@ -198,7 +198,7 @@ def rfid_scan():
     rfid_tag = normalizar_tag(data.get('rfid_tag', ''))
     if not RE_TAG.match(rfid_tag):
         return jsonify({'error': 'Tag RFID inválido'}), 400
-
+ 
     with db() as (_, cursor):
         cursor.execute(
             """SELECT r.estado, e.nombre, TIMESTAMPDIFF(SECOND, r.fecha_hora, NOW()) AS seg
@@ -215,12 +215,12 @@ def rfid_scan():
                 'nombre': ultimo.get('nombre') or 'No registrado',
                 'ignorado': True
             })
-
+ 
         # Se busca el tag SIN filtrar por estado, comparando ambos lados normalizados
         cursor.execute(f"SELECT * FROM estudiantes WHERE {TAG_SQL} = %s", (rfid_tag,))
         estudiante = cursor.fetchone()
         activo = bool(estudiante) and str(estudiante.get('estado') or '').strip().upper() == 'ACTIVO'
-
+ 
         if activo:
             estudiante_id = estudiante['id']
             doc = estudiante['documento']
@@ -233,23 +233,23 @@ def rfid_scan():
         elif estudiante:
             # Registrado pero desactivado: se deja el nombre para que el panel muestre "(suspendido)"
             estado_registro, doc, estudiante_id, nombre = 'DENEGADO', estudiante['documento'], estudiante['id'], estudiante['nombre']
-            app.logger.info('Tag %s DENEGADO: estudiante inactivo (estado=%r)', rfid_tag, estudiante.get('estado'))
+            app.logger.warning('Tag %s DENEGADO: estudiante inactivo (estado=%r)', rfid_tag, estudiante.get('estado'))
         else:
             estado_registro, doc, estudiante_id, nombre = 'DENEGADO', '0000', None, 'No registrado'
-            app.logger.info('Tag %s DENEGADO: no existe en la tabla estudiantes', rfid_tag)
-
+            app.logger.warning('Tag %s DENEGADO: no existe en la tabla estudiantes', rfid_tag)
+ 
         cursor.execute(
             "INSERT INTO registros_acceso (estudiante_id, rfid_tag, estado) VALUES (%s, %s, %s)",
             (estudiante_id, rfid_tag, estado_registro))
-
+ 
     return jsonify({
         'idEstudiante': enmascarar(doc),
         'codigoRfid': rfid_tag,
         'estadoStr': estado_registro,
         'nombre': nombre
     })
-
-
+ 
+ 
 # ------------------------------------------------------------
 #  2. Monitoreo en vivo
 # ------------------------------------------------------------
@@ -266,7 +266,7 @@ def ultimos_registros():
             ORDER BY r.id DESC LIMIT 5
         """)
         registros = cursor.fetchall()
-
+ 
     bogota = timedelta(hours=-5)  # Render corre en UTC; Colombia = UTC-5
     for reg in registros:
         dt = reg.get('fecha_hora')
@@ -276,8 +276,8 @@ def ultimos_registros():
             reg['fecha_hora'] = str(dt)
         reg['idEstudiante'] = enmascarar(reg['idEstudiante'])  # enmascarado en el servidor
     return jsonify(registros)
-
-
+ 
+ 
 @app.route('/api/stats', methods=['GET'])
 @requiere_auth()
 def obtener_estadisticas():
@@ -291,8 +291,8 @@ def obtener_estadisticas():
         cursor.execute("SELECT COUNT(*) AS total FROM estudiantes WHERE dentro = 1")
         aforo = cursor.fetchone()['total']
     return jsonify({'aforo': aforo, 'ingresos': ingresos, 'salidas': salidas, 'alertas': alertas})
-
-
+ 
+ 
 # ------------------------------------------------------------
 #  3. Estudiantes
 # ------------------------------------------------------------
@@ -305,8 +305,8 @@ def obtener_estudiantes():
     for e in estudiantes:
         e['documento'] = enmascarar(e['documento'])
     return jsonify(estudiantes)
-
-
+ 
+ 
 @app.route('/api/estudiantes', methods=['POST'])
 @requiere_auth(solo_admin=True)
 def agregar_estudiante():
@@ -315,12 +315,12 @@ def agregar_estudiante():
     nombre = data.get('nombre', '')
     carrera = data.get('carrera', '')
     rfid_tag = normalizar_tag(data.get('rfid_tag', ''))
-
+ 
     if not (RE_DOC.match(documento) and texto_valido(nombre) and texto_valido(carrera) and RE_TAG.match(rfid_tag)):
         return jsonify({'error': 'Datos inválidos: revise documento, nombre, carrera y tag'}), 400
     if data.get('autorizacion') is not True:
         return jsonify({'error': 'Se requiere la autorización del titular para el tratamiento de sus datos'}), 400
-
+ 
     with db() as (_, cursor):
         cursor.execute(
             """INSERT INTO estudiantes (documento, nombre, carrera, rfid_tag, estado, autorizacion_datos, fecha_autorizacion)
@@ -328,8 +328,8 @@ def agregar_estudiante():
             (documento, nombre.strip(), carrera.strip(), rfid_tag))
     auditar(g.usuario, 'ESTUDIANTE_CREADO', f'tag={rfid_tag}')
     return jsonify({'mensaje': 'Estudiante registrado correctamente'}), 201
-
-
+ 
+ 
 @app.route('/api/estudiantes/estado', methods=['PUT'])
 @requiere_auth(solo_admin=True)
 def cambiar_estado_estudiante():
@@ -338,13 +338,13 @@ def cambiar_estado_estudiante():
     nuevo_estado = data.get('estado')
     if not RE_TAG.match(rfid_tag) or nuevo_estado not in ('ACTIVO', 'INACTIVO'):
         return jsonify({'error': 'Parámetros inválidos'}), 400
-
+ 
     with db() as (_, cursor):
         cursor.execute(f"UPDATE estudiantes SET estado = %s, dentro = 0 WHERE {TAG_SQL} = %s", (nuevo_estado, rfid_tag))
     auditar(g.usuario, 'ESTADO_CAMBIADO', f'tag={rfid_tag} estado={nuevo_estado}')
     return jsonify({'mensaje': f'Estado actualizado a {nuevo_estado}'})
-
-
+ 
+ 
 @app.route('/api/estudiantes/<rfid_tag>', methods=['PUT'])
 @requiere_auth(solo_admin=True)
 def rectificar_estudiante(rfid_tag):
@@ -366,13 +366,13 @@ def rectificar_estudiante(rfid_tag):
         campos.append('documento = %s'); valores.append(str(data['documento']))
     if not RE_TAG.match(rfid_tag) or not campos:
         return jsonify({'error': 'Nada que actualizar'}), 400
-
+ 
     with db() as (_, cursor):
         cursor.execute(f"UPDATE estudiantes SET {', '.join(campos)} WHERE {TAG_SQL} = %s", (*valores, rfid_tag))
     auditar(g.usuario, 'ESTUDIANTE_RECTIFICADO', f'tag={rfid_tag} campos={",".join(c.split(" ")[0] for c in campos)}')
     return jsonify({'mensaje': 'Datos actualizados'})
-
-
+ 
+ 
 @app.route('/api/estudiantes/<rfid_tag>/datos', methods=['GET'])
 @requiere_auth(solo_admin=True)
 def consultar_datos_titular(rfid_tag):
@@ -394,8 +394,8 @@ def consultar_datos_titular(rfid_tag):
         a['fecha_hora'] = str(a['fecha_hora'])
     auditar(g.usuario, 'CONSULTA_TITULAR', f'tag={rfid_tag}')
     return jsonify({'estudiante': est, 'accesos': accesos})
-
-
+ 
+ 
 @app.route('/api/estudiantes/<rfid_tag>', methods=['DELETE'])
 @requiere_auth(solo_admin=True)
 def eliminar_estudiante(rfid_tag):
@@ -414,8 +414,8 @@ def eliminar_estudiante(rfid_tag):
     auditar(g.usuario, 'ESTUDIANTE_ELIMINADO', f'tag={rfid_tag} registros={eliminados}')
     return jsonify({'mensaje': f"Estudiante '{estudiante['nombre']}' eliminado correctamente",
                     'registros_acceso_eliminados': eliminados}), 200
-
-
+ 
+ 
 # ------------------------------------------------------------
 #  4. Autenticación
 # ------------------------------------------------------------
@@ -426,7 +426,7 @@ def login():
     clave = str(data.get('clave', ''))
     if not usuario_input or not clave or len(clave) > 128:
         return jsonify({'error': 'Usuario y clave requeridos'}), 400
-
+ 
     with db() as (_, cursor):
         # Bloqueo temporal tras demasiados intentos fallidos (por IP o por usuario)
         cursor.execute(
@@ -436,7 +436,7 @@ def login():
             (BLOQUEO_MINUTOS, request.remote_addr, usuario_input))
         if cursor.fetchone()['n'] >= BLOQUEO_INTENTOS:
             return jsonify({'error': f'Demasiados intentos. Espere {BLOQUEO_MINUTOS} minutos.'}), 429
-
+ 
         cursor.execute("SELECT id, usuario, rol, password_hash FROM usuarios WHERE usuario = %s", (usuario_input,))
         u = cursor.fetchone()
         ok = False
@@ -450,17 +450,17 @@ def login():
             ok = check_password_hash(u['password_hash'], clave)
         else:
             check_password_hash(HASH_FICTICIO, clave)  # mismo tiempo de respuesta: no revela si el usuario existe
-
+ 
     if not ok:
         auditar(usuario_input, 'LOGIN_FALLIDO')
         return jsonify({'error': 'Credenciales inválidas'}), 401
-
+ 
     auditar(u['usuario'], 'LOGIN_OK')
     token = serializer.dumps({'u': u['usuario'], 'r': u['rol']})
     return jsonify({'mensaje': 'Autenticación exitosa', 'usuario': u['usuario'], 'rol': u['rol'],
                     'token': token, 'expira_horas': TOKEN_HORAS}), 200
-
-
+ 
+ 
 # ------------------------------------------------------------
 #  5. Registros y retención
 # ------------------------------------------------------------
@@ -473,8 +473,8 @@ def eliminar_registros():
         cursor.execute("UPDATE estudiantes SET dentro = 0")
     auditar(g.usuario, 'REGISTROS_ELIMINADOS', f'filas={filas}')
     return jsonify({'mensaje': f'{filas} registros eliminados correctamente'}), 200
-
-
+ 
+ 
 @app.route('/api/privacidad/purgar', methods=['POST'])
 @requiere_auth(solo_admin=True)
 def purgar_registros_antiguos():
@@ -484,8 +484,9 @@ def purgar_registros_antiguos():
         filas = cursor.rowcount
     auditar(g.usuario, 'PURGA_RETENCION', f'filas={filas} dias={RETENCION_DIAS}')
     return jsonify({'mensaje': f'{filas} registros anteriores a {RETENCION_DIAS} días eliminados'}), 200
-
-
+ 
+ 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=os.environ.get('FLASK_DEBUG', 'false').lower() == 'true')
+ 

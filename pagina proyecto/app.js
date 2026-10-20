@@ -11,7 +11,12 @@ const API_BASE = 'https://sistema-fet-backend.onrender.com';
 // ── Seguridad: token de sesión SOLO en memoria (no se guarda en el navegador) ──
 let authToken = null;
 let rolActual = null;
-const ROL_ADMIN = 'Administrador';
+const ROLES_ADMIN = ['administrador', 'administradora', 'admin', 'administrator', 'superadmin'];
+ 
+/** Igual que es_admin() del servidor: no distingue mayúsculas ni espacios. */
+function esAdmin(rol) {
+    return ROLES_ADMIN.includes(String(rol ?? '').trim().toLowerCase());
+}
  
 /** Normaliza el tag igual que el servidor: sin espacios, ':' ni '-', en MAYÚSCULAS. */
 function normalizarTag(v) {
@@ -30,7 +35,7 @@ function leerJson(res) {
  
 /** Muestra u oculta las acciones que solo puede hacer el Administrador. */
 function aplicarPermisos() {
-    document.body.classList.toggle('rol-consulta', rolActual !== ROL_ADMIN);
+    document.body.classList.toggle('rol-consulta', !esAdmin(rolActual));
 }
  
 /** Escapa texto antes de insertarlo con innerHTML (evita XSS). */

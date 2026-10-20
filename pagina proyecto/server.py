@@ -82,6 +82,10 @@ if ssl_ca_path:
  
 ANTIREBOTE_SEGUNDOS = 5
  
+# La BD guarda la hora en UTC (Render/TiDB); Colombia es UTC-5 todo el año
+OFFSET_HORAS = 5
+FECHA_LOCAL_SQL = f'(r.fecha_hora - INTERVAL {OFFSET_HORAS} HOUR)'
+ 
 RE_TAG = re.compile(r'^[0-9A-Z-]{4,32}$')
 RE_DOC = re.compile(r'^[0-9A-Za-z]{4,20}$')
 RE_HASH_LEGADO = re.compile(r'^[0-9a-f]{64}$')  # SHA-256 antiguo (sin sal)
@@ -296,7 +300,116 @@ def obtener_estadisticas():
         alertas = cursor.fetchone()['total']
         cursor.execute("SELECT COUNT(*) AS total FROM estudiantes WHERE dentro = 1")
         aforo = cursor.fetchone()['total']
-    return jsonify({'aforo': aforo, 'ingresos': ingresos, 'salidas': salidas, 'alertas': alertas})
+        # Totales del día en hora de Colombia (la BD guarda UTC)
+        cursor.execute(f"""SELECT
+                SUM(estado IN ('INGRESO', 'AUTORIZADO')) AS ingresos_hoy,
+                SUM(estado = 'SALIDA') AS salidas_hoy,
+                SUM(estado = 'DENEGADO') AS alertas_hoy
+            FROM registros_acceso r
+            WHERE r.fecha_hora >= NOW() - INTERVAL 2 DAY
+              AND DATE({FECHA_LOCAL_SQL}) = DATE(NOW() - INTERVAL {OFFSET_HORAS} HOUR)""")
+        hoy = cursor.fetchone()
+    return jsonify({'aforo': aforo, 'ingresos': ingresos, 'salidas': salidas, 'alertas': alertas,
+                    'ingresos_hoy': int(hoy['ingresos_hoy'] or 0), 'salidas_hoy': int(hoy['salidas_hoy'] or 0),
+                    'alertas_hoy': int(hoy['alertas_hoy'] or 0)})
+ 
+ 
+# ------------------------------------------------------------
+#  2b. Reportes filtrables (Objetivo específico 3 / RF05)
+# ------------------------------------------------------------
+RE_FECHA = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+RE_HORA = re.compile(r'^\d{2}:\d{2}$')
+ESTADOS_REPORTE = ('INGRESO', 'SALIDA', 'DENEGADO')
+MAX_FILAS_REPORTE = 2000
+ 
+ 
+@app.route('/api/reportes/registros', methods=['GET'])
+@requiere_auth()
+def reporte_registros():
+    """Historial de ingresos y salidas filtrado por rango de fechas, franja horaria,
+    estudiante (nombre, carrera o tag) y estado. Fechas y horas en hora de Colombia."""
+    a = request.args
+    desde, hasta = a.get('desde', ''), a.get('hasta', '')
+    hora_desde, hora_hasta = a.get('hora_desde', ''), a.get('hora_hasta', '')
+    texto = a.get('q', '').strip()[:50]
+    estado = a.get('estado', '').strip().upper()
+ 
+    for f in (desde, hasta):
+        if f and not RE_FECHA.match(f):
+            return jsonify({'error': 'Fecha inválida (use AAAA-MM-DD)'}), 400
+    for h in (hora_desde, hora_hasta):
+        if h and not RE_HORA.match(h):
+            return jsonify({'error': 'Hora inválida (use HH:MM)'}), 400
+    if estado and estado not in ESTADOS_REPORTE:
+        return jsonify({'error': 'Estado inválido'}), 400
+    if texto and re.search(r'[\x00-\x1f<>]', texto):
+        return jsonify({'error': 'Búsqueda inválida'}), 400
+ 
+    condiciones, valores = [], []
+    if desde:
+        condiciones.append(f'DATE({FECHA_LOCAL_SQL}) >= %s'); valores.append(desde)
+    if hasta:
+        condiciones.append(f'DATE({FECHA_LOCAL_SQL}) <= %s'); valores.append(hasta)
+    if hora_desde:
+        condiciones.append(f'TIME({FECHA_LOCAL_SQL}) >= %s'); valores.append(hora_desde + ':00')
+    if hora_hasta:
+        condiciones.append(f'TIME({FECHA_LOCAL_SQL}) <= %s'); valores.append(hora_hasta + ':59')
+    if estado == 'INGRESO':
+        condiciones.append("r.estado IN ('INGRESO', 'AUTORIZADO')")
+    elif estado:
+        condiciones.append('r.estado = %s'); valores.append(estado)
+    if texto:
+        like = '%' + texto.replace('\\', '').replace('%', '').replace('_', '') + '%'
+        condiciones.append('(e.nombre LIKE %s OR e.carrera LIKE %s OR UPPER(r.rfid_tag) LIKE UPPER(%s))')
+        valores += [like, like, like]
+ 
+    where = ('WHERE ' + ' AND '.join(condiciones)) if condiciones else ''
+    with db() as (_, cursor):
+        cursor.execute(f"""
+            SELECT r.id, {FECHA_LOCAL_SQL} AS fecha_local, r.rfid_tag, r.estado,
+                   COALESCE(e.documento, '0000') AS documento, e.nombre, e.carrera
+            FROM registros_acceso r
+            LEFT JOIN estudiantes e ON r.estudiante_id = e.id
+            {where}
+            ORDER BY r.fecha_hora ASC, r.id ASC
+            LIMIT {MAX_FILAS_REPORTE + 1}""", tuple(valores))
+        filas = cursor.fetchall()
+ 
+    truncado = len(filas) > MAX_FILAS_REPORTE
+    filas = filas[:MAX_FILAS_REPORTE]
+    resultado = [{
+        'id': f['id'],
+        'fecha': f['fecha_local'].strftime('%Y-%m-%d') if f['fecha_local'] else '',
+        'hora': f['fecha_local'].strftime('%H:%M:%S') if f['fecha_local'] else '',
+        'idEstudiante': enmascarar(f['documento']),
+        'nombre': f['nombre'] or 'No registrado',
+        'carrera': f['carrera'] or '',
+        'rfid_tag': f['rfid_tag'],
+        'estado': 'INGRESO' if f['estado'] == 'AUTORIZADO' else f['estado'],
+    } for f in filas]
+    auditar(g.usuario, 'REPORTE_CONSULTADO', f'desde={desde} hasta={hasta} filas={len(resultado)}')
+    return jsonify({'registros': resultado, 'total': len(resultado), 'truncado': truncado})
+ 
+ 
+@app.route('/api/reportes/dentro', methods=['GET'])
+@requiere_auth()
+def reporte_dentro():
+    """Estudiantes que registraron ingreso y aún no su salida, con la hora de su último ingreso."""
+    with db() as (_, cursor):
+        cursor.execute(f"""
+            SELECT e.nombre, e.carrera, e.documento, e.rfid_tag,
+                   (SELECT {FECHA_LOCAL_SQL} FROM registros_acceso r
+                     WHERE r.estudiante_id = e.id AND r.estado IN ('INGRESO', 'AUTORIZADO')
+                     ORDER BY r.id DESC LIMIT 1) AS ultimo_ingreso
+            FROM estudiantes e
+            WHERE e.dentro = 1
+            ORDER BY e.nombre""")
+        filas = cursor.fetchall()
+    return jsonify([{
+        'nombre': f['nombre'], 'carrera': f['carrera'], 'idEstudiante': enmascarar(f['documento']),
+        'rfid_tag': f['rfid_tag'],
+        'ultimo_ingreso': f['ultimo_ingreso'].strftime('%Y-%m-%d %H:%M:%S') if f['ultimo_ingreso'] else '',
+    } for f in filas])
  
  
 # ------------------------------------------------------------

@@ -4,18 +4,40 @@
 //  Autores: Ordonez, Cardoso, Serrato — FET 2026
 //  Licencia Privativa
 // ============================================================
-
+ 
 // ── URL del backend en Render (TiDB Cloud + Flask) ──
 const API_BASE = 'https://sistema-fet-backend.onrender.com';
-
+ 
 // ── Seguridad: token de sesión SOLO en memoria (no se guarda en el navegador) ──
 let authToken = null;
-
+let rolActual = null;
+const ROL_ADMIN = 'Administrador';
+ 
+/** Normaliza el tag igual que el servidor: sin espacios, ':' ni '-', en MAYÚSCULAS. */
+function normalizarTag(v) {
+    return String(v ?? '').replace(/[\s:\-]/g, '').toUpperCase();
+}
+ 
+/** Lee la respuesta como JSON aunque el servidor devuelva otra cosa (p. ej. Render arrancando). */
+function leerJson(res) {
+    return res.json().catch(() => ({})).then(data => {
+        if (res.status === 429 && !data.error) data.error = 'Demasiados intentos. Espere unos minutos.';
+        if (res.status === 403 && !data.error) data.error = 'Permisos insuficientes.';
+        if (res.status >= 500 && !data.error) data.error = 'Error interno del servidor.';
+        return { status: res.status, data };
+    });
+}
+ 
+/** Muestra u oculta las acciones que solo puede hacer el Administrador. */
+function aplicarPermisos() {
+    document.body.classList.toggle('rol-consulta', rolActual !== ROL_ADMIN);
+}
+ 
 /** Escapa texto antes de insertarlo con innerHTML (evita XSS). */
 function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-
+ 
 /** fetch que adjunta el token y cierra la sesión si el servidor responde 401. */
 function apiFetch(path, opts = {}) {
     const headers = Object.assign({}, opts.headers || {});
@@ -25,20 +47,20 @@ function apiFetch(path, opts = {}) {
         return res;
     });
 }
-
+ 
 function sesionExpirada() {
     authToken = null;
     salirSistema();
     mostrarToast('Su sesión expiró. Inicie sesión de nuevo.', 'danger');
 }
-
+ 
 // ── Aplicar tema guardado ANTES del primer render (evita flash) ──
 (function aplicarTemaGuardado() {
     const temaGuardado = localStorage.getItem('fet-theme') || 'dark';
     document.documentElement.setAttribute('data-theme', temaGuardado);
     // Los iconos se sincronizan despues del DOMContentLoaded
 })();
-
+ 
 // ── Estado global ──
 let aforoMaximo       = 150;
 let puertoActual      = 'COM3';
@@ -48,11 +70,11 @@ let monitorPausado    = false;
 let clearId           = 0;  // ID del ultimo registro al momento de limpiar (marca de agua)
 let lastNotifiedId    = 0;  // ID del ultimo registro para el que se mostro notificacion
 let firstPollDone     = false; // true tras el primer ciclo de polling (evita notificar historico)
-
+ 
 // ============================================================
 //  LOGIN / LOGOUT
 // ============================================================
-
+ 
 /**
  * Autentica contra el endpoint POST /api/login
  * que valida usuario + clave con hash SHA-256 en MySQL.
@@ -62,25 +84,27 @@ function entrarSistema(e) {
     const usuario = document.getElementById('input-usuario').value.trim();
     const clave   = document.getElementById('input-clave').value;
     const btn     = document.getElementById('btn-login');
-
+ 
     if (!usuario || !clave) {
         mostrarToast('Complete ambos campos.', 'danger');
         return;
     }
-
+ 
     // Animacion de carga
     btn.disabled = true;
     btn.querySelector('.btn-text').textContent = 'Verificando...';
-
+ 
     fetch(API_BASE + '/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ usuario: usuario, clave: clave })
     })
-    .then(res => res.json().then(data => ({ status: res.status, data })))
+    .then(leerJson)
     .then(({ status, data }) => {
-        if (status === 200 && data.usuario) {
+        if (status === 200 && data.usuario && data.token) {
             authToken = data.token;
+            rolActual = data.rol || null;
+            aplicarPermisos();
             // Login exitoso
             const nombreSidebar = document.getElementById('sidebar-username');
             if (nombreSidebar) {
@@ -90,7 +114,7 @@ function entrarSistema(e) {
             if (rolEl && data.rol) {
                 rolEl.textContent = data.rol;
             }
-
+ 
             const loginScreen = document.getElementById('login-screen');
             loginScreen.style.opacity = '0';
             setTimeout(() => {
@@ -114,16 +138,17 @@ function entrarSistema(e) {
         console.error('Login error:', err);
     });
 }
-
+ 
 function shakeLogin() {
     const box = document.querySelector('.login-box');
     box.style.animation = 'none';
     void box.offsetWidth;
     box.style.animation = 'shake 0.4s ease';
 }
-
+ 
 function salirSistema() {
     authToken = null;
+    rolActual = null;
     // Detener polling
     if (pollingInterval) {
         clearInterval(pollingInterval);
@@ -145,11 +170,11 @@ function salirSistema() {
     setTimeout(() => { loginScreen.style.opacity = '1'; }, 50);
     mostrarToast('Sesion cerrada correctamente.', 'ok');
 }
-
+ 
 // ============================================================
 //  SIDEBAR MÓVIL — hamburguesa / cajero deslizante
 // ============================================================
-
+ 
 /**
  * Abre el sidebar como panel deslizante (sólo activo en móvil ≤768px).
  * En escritorio no hace nada (el sidebar siempre es visible).
@@ -164,7 +189,7 @@ function abrirSidebar() {
     // Actualizar aria-expanded en todos los botones hamburguesa
     document.querySelectorAll('.btn-hamburger').forEach(b => b.setAttribute('aria-expanded', 'true'));
 }
-
+ 
 /**
  * Cierra el sidebar móvil.
  */
@@ -177,11 +202,11 @@ function cerrarSidebar() {
     document.body.classList.remove('sidebar-is-open');
     document.querySelectorAll('.btn-hamburger').forEach(b => b.setAttribute('aria-expanded', 'false'));
 }
-
+ 
 // ============================================================
 //  NAVEGACION ENTRE VISTAS
 // ============================================================
-
+ 
 function cambiarVista(idVista, btnElement) {
     document.querySelectorAll('.nav-btn').forEach(b => {
         b.classList.remove('active');
@@ -191,28 +216,28 @@ function cambiarVista(idVista, btnElement) {
     btnElement.classList.add('active');
     btnElement.setAttribute('aria-current', 'page');
     document.getElementById('vista-' + idVista).classList.add('active');
-
+ 
     // En móvil cerrar el sidebar al navegar
     if (window.innerWidth <= 768) cerrarSidebar();
-
+ 
     if (idVista === 'reportes') sincronizarReportes();
     if (idVista === 'estudiantes') cargarEstudiantesDesdeAPI();
 }
-
+ 
 // ============================================================
 //  MONITOREO EN VIVO — con polling al backend
 // ============================================================
-
+ 
 function iniciarMonitor() {
     historialCompleto = [];
     lastNotifiedId    = 0;
     firstPollDone     = false;
     actualizarEstadoPuerto();
-
+ 
     // Cargar datos iniciales desde el backend
     cargarEstadisticas();
     cargarUltimosRegistros();
-
+ 
     // Polling cada 3 segundos para datos en tiempo real
     if (pollingInterval) clearInterval(pollingInterval);
     pollingInterval = setInterval(() => {
@@ -220,7 +245,7 @@ function iniciarMonitor() {
         cargarUltimosRegistros();
     }, 3000);
 }
-
+ 
 /**
  * Consulta GET /api/stats para obtener aforo, ingresos y alertas
  */
@@ -231,25 +256,25 @@ function cargarEstadisticas() {
         const aforoEl   = document.getElementById('aforo');
         const ingresosEl = document.getElementById('ingresos');
         const alertasEl  = document.getElementById('alertas');
-
+ 
         const aforoAnterior = parseInt(aforoEl.innerText.replace(/,/g, '')) || 0;
-
+ 
         aforoEl.innerText    = (data.aforo || 0).toLocaleString();
         ingresosEl.innerText = (data.ingresos || 0).toLocaleString();
         alertasEl.innerText  = (data.alertas || 0).toLocaleString();
-
+ 
         // Animar si cambio
         if (data.aforo !== aforoAnterior) {
             animarContador(aforoEl);
             animarContador(ingresosEl);
         }
-
+ 
         actualizarBarraAforo(data.aforo || 0);
         actualizarBadgeAlertas(data.alertas || 0);
     })
     .catch(err => console.error('Error cargando stats:', err));
 }
-
+ 
 /**
  * Consulta GET /api/ultimos-registros para llenar la tabla de monitoreo.
  * Solo muestra registros posteriores al clearTimestamp (si existe).
@@ -260,6 +285,7 @@ function cargarUltimosRegistros() {
     apiFetch('/api/ultimos-registros')
     .then(res => res.json())
     .then(registrosRaw => {
+        if (!Array.isArray(registrosRaw)) return;  // 401/500: no tocar la tabla
         // ── NOTIFICACIONES DE INGRESO / SALIDA ──
         // En el primer ciclo solo guardamos el watermark sin notificar (historial existente).
         if (!firstPollDone) {
@@ -280,28 +306,28 @@ function cargarUltimosRegistros() {
                 if (maxId > lastNotifiedId) lastNotifiedId = maxId;
             }
         }
-
+ 
         // ── FILTRADO Y TABLA ──
         let registros = registrosRaw;
         const tabla  = document.getElementById('tabla-registros');
         const sinReg = document.getElementById('sin-registros');
         const contEl = document.getElementById('table-count');
-
+ 
         // Filtrar: solo mostrar registros con id > clearId (marca de agua)
         if (clearId > 0) {
             registros = registros.filter(reg => (reg.id || 0) > clearId);
         }
-
+ 
         if (!registros || registros.length === 0) {
             tabla.innerHTML = '';
             sinReg.style.display = 'flex';
             contEl.textContent = '0 registros';
             return;
         }
-
+ 
         sinReg.style.display = 'none';
         contEl.textContent = `${registros.length} registro${registros.length !== 1 ? 's' : ''}`;
-
+ 
         tabla.innerHTML = '';
         registros.forEach(reg => {
             const idEnmascarado = enmascararId(reg.idEstudiante || reg.documento || '0000');
@@ -311,7 +337,7 @@ function cargarUltimosRegistros() {
                              : reg.estado === 'SALIDA'     ? 'badge salida'
                              : 'badge warn';
             const hora = reg.fecha_hora || '';
-
+ 
             const tr = document.createElement('tr');
             tr.className = 'new-row';
             tr.dataset.recordId = reg.id || 0;
@@ -319,11 +345,17 @@ function cargarUltimosRegistros() {
                 <td style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:.85rem;">${esc(hora)}</td>
                 <td style="font-family:'JetBrains Mono',monospace;letter-spacing:1px;color:var(--text-sub);">${idEnmascarado}</td>
                 <td class="rfid-tag">${esc(reg.rfid_tag || '')}</td>
-                <td><span class="${badgeClass}">${esc(reg.estado)}</span></td>
+                <td><span class="${badgeClass}">${esc(reg.estado)}</span>${
+                    reg.estado === 'DENEGADO' && !reg.nombre_estudiante && reg.rfid_tag
+                        ? ` <button class="btn-table-action solo-admin" data-tag="${esc(reg.rfid_tag)}" onclick="cambiarVista('estudiantes', document.getElementById('nav-estudiantes')); abrirModalAsignar(this.dataset.tag)" title="Registrar esta tarjeta a un estudiante">Asignar</button>`
+                        : reg.estado === 'DENEGADO' && reg.nombre_estudiante
+                        ? ` <span style="color:var(--text-muted);font-size:.8rem;">${esc(reg.nombre_estudiante)} (suspendido)</span>`
+                        : ''
+                }</td>
             `;
             tabla.appendChild(tr);
         });
-
+ 
         // Actualizar historial para reportes
         historialCompleto = registros.map(r => ({
             dbId: r.id || 0,
@@ -335,7 +367,7 @@ function cargarUltimosRegistros() {
     })
     .catch(err => console.error('Error cargando registros:', err));
 }
-
+ 
 /**
  * Muestra una notificacion prominente cuando se detecta un nuevo registro RFID.
  * Diferencia entre Ingreso, Salida y Acceso denegado.
@@ -344,24 +376,24 @@ function cargarUltimosRegistros() {
 function mostrarNotificacionAcceso(reg) {
     const nombre = reg.nombre_estudiante || null;
     const tag    = reg.rfid_tag || '';
-
+ 
     if (reg.estado === 'INGRESO' || reg.estado === 'AUTORIZADO') {
         // Ingreso autorizado
         const quien = nombre ? nombre : `Tag: ${tag}`;
         mostrarToastEvento(`\u2705 Ingreso \u2014 ${quien}`, 'ok');
-
+ 
     } else if (reg.estado === 'SALIDA') {
         // Salida registrada
         const quien = nombre ? nombre : `Tag: ${tag}`;
         mostrarToastEvento(`\uD83D\uDEAA Salida \u2014 ${quien}`, 'salida');
-
+ 
     } else {
         // DENEGADO: tag desconocido o estudiante suspendido
         const quien = nombre ? `${nombre} (suspendido)` : `Tag desconocido: ${tag}`;
         mostrarToastEvento(`\u26D4 Acceso Denegado \u2014 ${quien}`, 'danger');
     }
 }
-
+ 
 /**
  * Toast especial para eventos de ingreso/salida/acceso (dura 5.5 s, mas prominente).
  * @param {string} mensaje - Texto a mostrar
@@ -369,13 +401,13 @@ function mostrarNotificacionAcceso(reg) {
  */
 function mostrarToastEvento(mensaje, tipo) {
     const toast = document.getElementById('toast');
-
+ 
     const iconos = {
         ok:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20" style="flex-shrink:0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`,
         salida: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20" style="flex-shrink:0"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>`,
         danger: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`
     };
-
+ 
     const claseToast = tipo === 'salida' ? 'toast-salida' : `toast-${tipo}`;
     toast.innerHTML  = (iconos[tipo] || iconos.danger) + `<span class="toast-msg" style="font-size:1rem;font-weight:600;"></span>`;
     toast.querySelector('.toast-msg').textContent = mensaje;
@@ -383,7 +415,7 @@ function mostrarToastEvento(mensaje, tipo) {
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => toast.classList.remove('visible'), 5500);
 }
-
+ 
 /**
  * Enmascara un ID estudiantil segun Ley 1581/2012 Habeas Data
  * Ej: "1075854589" → "***4589"
@@ -393,7 +425,7 @@ function enmascararId(id) {
     if (s.length <= 4) return '***' + s;
     return '***' + s.slice(-4);
 }
-
+ 
 /**
  * Elimina PERMANENTEMENTE todos los registros de la base de datos
  * via DELETE /api/registros y limpia la vista.
@@ -401,9 +433,9 @@ function enmascararId(id) {
 function limpiarRegistros() {
     const btn = document.getElementById('btn-limpiar');
     if (btn) btn.disabled = true;
-
+ 
     apiFetch('/api/registros', { method: 'DELETE' })
-    .then(res => res.json().then(data => ({ status: res.status, data })))
+    .then(leerJson)
     .then(({ status, data }) => {
         if (status === 200) {
             // Limpiar UI completamente
@@ -432,7 +464,7 @@ function limpiarRegistros() {
         if (btn) btn.disabled = false;
     });
 }
-
+ 
 /** Actualiza visualmente la barra de aforo */
 function actualizarBarraAforo(actual) {
     const pct = Math.min((actual / aforoMaximo) * 100, 100);
@@ -444,7 +476,7 @@ function actualizarBarraAforo(actual) {
     const lbl = document.getElementById('aforo-max-label');
     if (lbl) lbl.textContent = aforoMaximo;
 }
-
+ 
 /** Actualiza el badge de alertas en el sidebar */
 function actualizarBadgeAlertas(n) {
     const badge = document.getElementById('badge-alertas');
@@ -458,7 +490,7 @@ function actualizarBadgeAlertas(n) {
         badge.style.display = 'none';
     }
 }
-
+ 
 /** Mini-animacion de rebote cuando un numero cambia */
 function animarContador(el) {
     el.style.transform = 'scale(1.18)';
@@ -469,53 +501,55 @@ function animarContador(el) {
         el.style.transition = 'transform 0.25s ease, color 0.25s ease';
     }, 220);
 }
-
+ 
 function actualizarEstadoPuerto() {
     const el = document.getElementById('estado-puerto');
     if (el) el.innerHTML = `<span class="dot-live"></span> Escuchando lecturas del lector RFID (WiFi)...`;
 }
-
+ 
 // ============================================================
 //  GESTION DE ESTUDIANTES — conectado al backend
 // ============================================================
-
-function abrirModalAsignar() {
+ 
+function abrirModalAsignar(tag) {
     document.getElementById('modal-overlay').classList.add('visible');
     document.getElementById('modal-autorizacion').checked = false;
+    // Tag leído por el lector (botón "Asignar" del monitoreo): se copia tal cual lo envió el ESP32
+    document.getElementById('modal-tag').value = typeof tag === 'string' ? tag : '';
     setTimeout(() => document.getElementById('modal-documento').focus(), 150);
 }
-
+ 
 function cerrarModalDirect() {
     document.getElementById('modal-overlay').classList.remove('visible');
     document.getElementById('form-estudiante').reset();
 }
-
+ 
 function cerrarModal(e) {
     if (e.target.id === 'modal-overlay') cerrarModalDirect();
 }
-
+ 
 /**
  * Guarda un estudiante via POST /api/estudiantes
  */
 function guardarEstudiante(e) {
     e.preventDefault();
-
+ 
     const documento = document.getElementById('modal-documento').value.trim();
     const nombre    = document.getElementById('modal-nombre').value.trim();
     const carrera   = document.getElementById('modal-carrera').value.trim();
-    const tag       = document.getElementById('modal-tag').value.trim().toUpperCase();
-
+    const tag       = normalizarTag(document.getElementById('modal-tag').value);
+ 
     const autorizacion = document.getElementById('modal-autorizacion').checked;
     if (!autorizacion) {
         mostrarToast('Confirme la autorización del titular para el tratamiento de datos.', 'danger');
         return;
     }
-
+ 
     if (!documento || !nombre || !carrera || !tag) {
         mostrarToast('Complete todos los campos.', 'danger');
         return;
     }
-
+ 
     apiFetch('/api/estudiantes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -527,7 +561,7 @@ function guardarEstudiante(e) {
             autorizacion: autorizacion
         })
     })
-    .then(res => res.json().then(data => ({ status: res.status, data })))
+    .then(leerJson)
     .then(({ status, data }) => {
         if (status === 201) {
             cerrarModalDirect();
@@ -542,7 +576,7 @@ function guardarEstudiante(e) {
         console.error('Error guardando estudiante:', err);
     });
 }
-
+ 
 /**
  * Carga la lista de estudiantes desde GET /api/estudiantes
  */
@@ -550,6 +584,7 @@ function cargarEstudiantesDesdeAPI(filtro) {
     apiFetch('/api/estudiantes')
     .then(res => res.json())
     .then(data => {
+        if (!Array.isArray(data)) throw new Error(data.error || 'Respuesta inválida');
         renderizarEstudiantes(data, filtro);
     })
     .catch(err => {
@@ -557,12 +592,12 @@ function cargarEstudiantesDesdeAPI(filtro) {
         console.error('Error cargando estudiantes:', err);
     });
 }
-
+ 
 /** Renderiza la tabla de estudiantes con datos del backend */
 function renderizarEstudiantes(lista, filtro) {
     const tbody  = document.getElementById('tabla-estudiantes');
     const sinEst = document.getElementById('sin-estudiantes');
-
+ 
     if (filtro && filtro.trim()) {
         const q = filtro.toLowerCase();
         lista = lista.filter(e =>
@@ -571,15 +606,15 @@ function renderizarEstudiantes(lista, filtro) {
             (e.rfid_tag || '').toLowerCase().includes(q)
         );
     }
-
+ 
     tbody.innerHTML = '';
-
+ 
     if (!lista || lista.length === 0) {
         sinEst.style.display = 'flex';
         return;
     }
     sinEst.style.display = 'none';
-
+ 
     lista.forEach(est => {
         const activo = (est.estado === 'ACTIVO');
         const tr = document.createElement('tr');
@@ -591,8 +626,10 @@ function renderizarEstudiantes(lista, filtro) {
             <td class="rfid-tag">${esc(est.rfid_tag)}</td>
             <td><span class="badge ${activo ? 'ok' : 'warn'}">${esc(est.estado)}</span></td>
             <td class="td-acciones">
-                <button class="btn-table-action" data-tag="${esc(est.rfid_tag)}" data-estado="${esc(est.estado)}" onclick="toggleEstado(this, this.dataset.tag, this.dataset.estado)">${activo ? 'Suspender' : 'Reactivar'}</button>
-                <button class="btn-table-action btn-table-delete" data-tag="${esc(est.rfid_tag)}" data-nombre="${esc(est.nombre)}" onclick="eliminarEstudiante(this.dataset.tag, this.dataset.nombre)" aria-label="Eliminar estudiante ${esc(est.nombre)}" title="Eliminar estudiante">
+                <button class="btn-table-action solo-admin" data-tag="${esc(est.rfid_tag)}" onclick="consultarDatosTitular(this.dataset.tag)" title="Descargar todos los datos del titular (derecho de consulta)">Datos</button>
+                <button class="btn-table-action solo-admin" data-tag="${esc(est.rfid_tag)}" data-nombre="${esc(est.nombre)}" data-carrera="${esc(est.carrera)}" onclick="rectificarEstudiante(this.dataset.tag, this.dataset.nombre, this.dataset.carrera)" title="Corregir datos del titular (derecho de rectificación)">Editar</button>
+                <button class="btn-table-action solo-admin" data-tag="${esc(est.rfid_tag)}" data-estado="${esc(est.estado)}" onclick="toggleEstado(this, this.dataset.tag, this.dataset.estado)">${activo ? 'Suspender' : 'Reactivar'}</button>
+                <button class="btn-table-action btn-table-delete solo-admin" data-tag="${esc(est.rfid_tag)}" data-nombre="${esc(est.nombre)}" onclick="eliminarEstudiante(this.dataset.tag, this.dataset.nombre)" aria-label="Eliminar estudiante ${esc(est.nombre)}" title="Eliminar estudiante">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" aria-hidden="true">
                         <polyline points="3 6 5 6 21 6"/>
                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
@@ -604,24 +641,24 @@ function renderizarEstudiantes(lista, filtro) {
         tbody.appendChild(tr);
     });
 }
-
+ 
 function filtrarEstudiantes() {
     const q = document.getElementById('input-buscar').value;
     cargarEstudiantesDesdeAPI(q);
 }
-
+ 
 /**
  * Cambia el estado de un estudiante via PUT /api/estudiantes/estado
  */
 function toggleEstado(btn, rfidTag, estadoActual) {
     const nuevoEstado = estadoActual === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO';
-
+ 
     apiFetch('/api/estudiantes/estado', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rfid_tag: rfidTag, estado: nuevoEstado })
     })
-    .then(res => res.json().then(data => ({ status: res.status, data })))
+    .then(leerJson)
     .then(({ status, data }) => {
         if (status === 200) {
             cargarEstudiantesDesdeAPI();
@@ -640,7 +677,7 @@ function toggleEstado(btn, rfidTag, estadoActual) {
         console.error('Error toggle estado:', err);
     });
 }
-
+ 
 /**
  * Elimina PERMANENTEMENTE un estudiante (y sus registros de acceso)
  * via DELETE /api/estudiantes/<rfid_tag>, previa confirmacion del usuario.
@@ -655,11 +692,11 @@ function eliminarEstudiante(rfidTag, nombre) {
         `Esta acción NO se puede deshacer.`
     );
     if (!confirmado) return;
-
+ 
     apiFetch(`/api/estudiantes/${encodeURIComponent(rfidTag)}`, {
         method: 'DELETE'
     })
-    .then(res => res.json().then(data => ({ status: res.status, data })))
+    .then(leerJson)
     .then(({ status, data }) => {
         if (status === 200) {
             cargarEstudiantesDesdeAPI();
@@ -676,11 +713,95 @@ function eliminarEstudiante(rfidTag, nombre) {
         console.error('Error eliminando estudiante:', err);
     });
 }
-
+ 
+/**
+ * Derecho de consulta (Ley 1581): descarga en JSON todos los datos del titular
+ * via GET /api/estudiantes/<rfid_tag>/datos (incluye el documento completo).
+ */
+function consultarDatosTitular(rfidTag) {
+    apiFetch(`/api/estudiantes/${encodeURIComponent(rfidTag)}/datos`)
+    .then(leerJson)
+    .then(({ status, data }) => {
+        if (status !== 200) {
+            mostrarToast(data.error || 'No se pudieron consultar los datos.', 'danger');
+            return;
+        }
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `datos_titular_${rfidTag}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        mostrarToast(`Datos del titular descargados (${(data.accesos || []).length} accesos).`, 'ok');
+    })
+    .catch(err => {
+        mostrarToast('Error de conexion al consultar datos.', 'danger');
+        console.error('Error consultando titular:', err);
+    });
+}
+ 
+/**
+ * Derecho de rectificación: corrige nombre, carrera y/o documento
+ * via PUT /api/estudiantes/<rfid_tag>. Solo envía los campos que cambiaron.
+ */
+function rectificarEstudiante(rfidTag, nombreActual, carreraActual) {
+    const nombre = window.prompt('Nombre completo:', nombreActual || '');
+    if (nombre === null) return;
+    const carrera = window.prompt('Carrera / Programa:', carreraActual || '');
+    if (carrera === null) return;
+    const documento = window.prompt('Documento de identidad (deje vacío para no cambiarlo):', '');
+    if (documento === null) return;
+ 
+    const cambios = {};
+    if (nombre.trim() && nombre.trim() !== nombreActual) cambios.nombre = nombre.trim();
+    if (carrera.trim() && carrera.trim() !== carreraActual) cambios.carrera = carrera.trim();
+    if (documento.trim()) cambios.documento = documento.trim();
+    if (Object.keys(cambios).length === 0) {
+        mostrarToast('No hay cambios para guardar.', 'danger');
+        return;
+    }
+ 
+    apiFetch(`/api/estudiantes/${encodeURIComponent(rfidTag)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cambios)
+    })
+    .then(leerJson)
+    .then(({ status, data }) => {
+        if (status === 200) {
+            cargarEstudiantesDesdeAPI();
+            mostrarToast(`Datos de la tarjeta ${rfidTag} actualizados.`, 'ok');
+        } else {
+            mostrarToast(data.error || 'Error al actualizar los datos.', 'danger');
+        }
+    })
+    .catch(err => {
+        mostrarToast('Error de conexion al actualizar.', 'danger');
+        console.error('Error rectificando estudiante:', err);
+    });
+}
+ 
+/**
+ * Política de retención: borra los registros de acceso más antiguos que
+ * RETENCION_DIAS (configurado en el servidor) via POST /api/privacidad/purgar.
+ */
+function purgarRegistrosAntiguos() {
+    if (!window.confirm('¿Eliminar los registros de acceso que superan el plazo de retención?\n\nEsta acción NO se puede deshacer.')) return;
+    apiFetch('/api/privacidad/purgar', { method: 'POST' })
+    .then(leerJson)
+    .then(({ status, data }) => {
+        mostrarToast(data.mensaje || data.error || 'Error al purgar registros.', status === 200 ? 'ok' : 'danger');
+    })
+    .catch(err => {
+        mostrarToast('Error de conexion al purgar.', 'danger');
+        console.error('Error purgando registros:', err);
+    });
+}
+ 
 // ============================================================
 //  REPORTES
 // ============================================================
-
+ 
 function sincronizarReportes() {
     // Traer stats actuales del backend
     apiFetch('/api/stats')
@@ -691,18 +812,18 @@ function sincronizarReportes() {
         document.getElementById('reporte-maximo').innerText   = aforoMaximo;
     })
     .catch(err => console.error('Error sincronizando reportes:', err));
-
+ 
     // Tabla de historial desde los ultimos registros cargados
     const tbody   = document.getElementById('tabla-historial');
     const sinHist = document.getElementById('sin-historial');
     tbody.innerHTML = '';
-
+ 
     if (historialCompleto.length === 0) {
         sinHist.style.display = 'flex';
         return;
     }
     sinHist.style.display = 'none';
-
+ 
     historialCompleto.forEach(reg => {
         const badgeClass = (reg.estado === 'INGRESO' || reg.estado === 'AUTORIZADO') ? 'badge ok'
                          : reg.estado === 'SALIDA' ? 'badge salida'
@@ -718,7 +839,7 @@ function sincronizarReportes() {
         tbody.appendChild(tr);
     });
 }
-
+ 
 /**
  * Genera y descarga un CSV con el historial.
  */
@@ -742,29 +863,29 @@ function exportarReporte() {
     URL.revokeObjectURL(url);
     mostrarToast(`Reporte CSV descargado (${historialCompleto.length} registros).`, 'ok');
 }
-
+ 
 // ============================================================
 //  CONFIGURACION
 // ============================================================
-
+ 
 function reconectarServicio(servicio) {
     const estadoEl = document.getElementById(`estado-${servicio}`);
     if (!estadoEl) return;
     estadoEl.textContent = 'Reconectando...';
     estadoEl.className = 'status-text-err';
     mostrarToast(`Reconectando ${servicio.toUpperCase()}...`, 'ok');
-
+ 
     setTimeout(() => {
         estadoEl.textContent = servicio === 'python' ? 'En Ejecucion' : 'Conectado';
         estadoEl.className = 'status-text-ok';
         mostrarToast(`${servicio.toUpperCase()} reconectado correctamente.`, 'ok');
     }, 2200);
 }
-
+ 
 function verLicencia() {
     mostrarToast('Licencia Privativa — FET Ingenieria de Software 2026. Todos los derechos reservados.', 'ok');
 }
-
+ 
 function guardarAforo() {
     const val = parseInt(document.getElementById('input-aforo-max').value);
     if (isNaN(val) || val < 1) {
@@ -779,36 +900,36 @@ function guardarAforo() {
     document.getElementById('reporte-maximo').innerText = aforoMaximo;
     mostrarToast(`Aforo maximo actualizado a ${aforoMaximo} personas.`, 'ok');
 }
-
+ 
 function guardarPuerto() {
     puertoActual = document.getElementById('select-puerto').value;
     actualizarEstadoPuerto();
     mostrarToast(`Puerto cambiado a ${puertoActual}.`, 'ok');
 }
-
+ 
 // ============================================================
 //  TOAST DE NOTIFICACION
 // ============================================================
-
+ 
 let toastTimeout = null;
-
+ 
 function mostrarToast(mensaje, tipo = 'ok') {
     const toast = document.getElementById('toast');
     const icono = tipo === 'ok'
         ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18" style="flex-shrink:0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`
         : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
-
+ 
     toast.innerHTML = icono + '<span class="toast-msg"></span>';
     toast.querySelector('.toast-msg').textContent = mensaje;
     toast.className = `toast toast-${tipo} visible`;
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => toast.classList.remove('visible'), 3800);
 }
-
+ 
 // ============================================================
 //  SHAKE (login fallido)
 // ============================================================
-
+ 
 const shakeStyle = document.createElement('style');
 shakeStyle.textContent = `
 @keyframes shake {
@@ -820,11 +941,11 @@ shakeStyle.textContent = `
 }
 `;
 document.head.appendChild(shakeStyle);
-
+ 
 // ============================================================
 //  MODO OSCURO / CLARO
 // ============================================================
-
+ 
 /**
  * Alterna entre modo oscuro y modo claro, actualizando:
  *   - El atributo data-theme en <html>
@@ -835,7 +956,7 @@ function toggleTema() {
     const html       = document.documentElement;
     const temaActual = html.getAttribute('data-theme') || 'dark';
     const nuevoTema  = temaActual === 'dark' ? 'light' : 'dark';
-
+ 
     html.setAttribute('data-theme', nuevoTema);
     localStorage.setItem('fet-theme', nuevoTema);
     sincronizarIconoTema(nuevoTema);
@@ -844,7 +965,7 @@ function toggleTema() {
         'ok'
     );
 }
-
+ 
 /**
  * Actualiza el icono (luna / sol) y la etiqueta del boton toggle
  * segun el tema pasado.
@@ -855,7 +976,7 @@ function sincronizarIconoTema(tema) {
     const iconLight = document.getElementById('theme-icon-light');
     const label     = document.getElementById('theme-label');
     if (!iconDark || !iconLight || !label) return;
-
+ 
     if (tema === 'light') {
         // Modo claro activo: mostrar icono de sol para indicar "volver a oscuro"
         iconDark.style.display  = 'none';
@@ -868,7 +989,7 @@ function sincronizarIconoTema(tema) {
         label.textContent       = 'Modo Claro';
     }
 }
-
+ 
 // Sincronizar icono con el tema que se cargo al inicio
 document.addEventListener('DOMContentLoaded', () => {
     const temaGuardado = localStorage.getItem('fet-theme') || 'dark';

@@ -236,7 +236,7 @@
                         </p>
                     </div>
                     <div class="header-actions">
-                        <button id="btn-limpiar" class="btn-neon btn-sm btn-danger-outline"
+                        <button id="btn-limpiar" class="btn-neon btn-sm btn-danger-outline solo-admin"
                             onclick="limpiarRegistros()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14"
                                 height="14" aria-hidden="true">
@@ -351,7 +351,7 @@
                         <h2>Gestion de Credenciales</h2>
                         <p class="header-sub">Base de datos de tarjetas RFID asignadas</p>
                     </div>
-                    <button id="btn-asignar" class="btn-neon btn-sm" onclick="abrirModalAsignar()">
+                    <button id="btn-asignar" class="btn-neon btn-sm solo-admin" onclick="abrirModalAsignar()">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14"
                             height="14" aria-hidden="true">
                             <line x1="12" y1="5" x2="12" y2="19" />
@@ -413,7 +413,7 @@
                             </svg>
                         </button>
                         <h2>Analisis y Reportes</h2>
-                        <p class="header-sub">Historial de sesion y metricas de rendimiento</p>
+                        <p class="header-sub">Historial filtrable por fecha, hora y estudiante</p>
                     </div>
                     <button id="btn-exportar" class="btn-neon btn-sm" onclick="exportarReporte()">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14"
@@ -434,7 +434,7 @@
                                 <polyline points="17 6 23 6 23 12" />
                             </svg></div>
                         <div class="card-body">
-                            <h3>Total Ingresos Hoy</h3>
+                            <h3>Ingresos Hoy</h3>
                             <div class="value number-font" id="reporte-ingresos" aria-live="polite">0</div>
                         </div>
                     </article>
@@ -447,7 +447,7 @@
                                 <line x1="12" y1="17" x2="12.01" y2="17" />
                             </svg></div>
                         <div class="card-body">
-                            <h3>Total Alertas Hoy</h3>
+                            <h3>Alertas Hoy</h3>
                             <div class="value number-font" id="reporte-alertas" aria-live="polite">0</div>
                         </div>
                     </article>
@@ -477,6 +477,7 @@
                         </svg>
                         Latencia de Ingreso por Persona
                     </h3>
+                    <p style="margin:-12px 0 16px;font-size:.78rem;color:var(--text-muted);">Valores de referencia del equipo (meta del sistema); requieren confirmacion con pruebas de rendimiento.</p>
                     <div class="latencia-row">
                         <div class="latencia-item">
                             <span class="latencia-label danger-text">Manual (Bitacora)</span>
@@ -507,15 +508,52 @@
                     </div>
                 </article>
 
+                <article class="cyber-card filtros-card" style="margin-bottom: 20px;" aria-label="Filtros del historial">
+                    <h3 style="margin-bottom: 16px;">Consultar historial de ingresos y salidas</h3>
+                    <form id="form-filtros" class="filtros-grid" onsubmit="buscarRegistros(event)">
+                        <label class="filtro-item">Desde
+                            <input id="filtro-desde" type="date" class="input-dark">
+                        </label>
+                        <label class="filtro-item">Hasta
+                            <input id="filtro-hasta" type="date" class="input-dark">
+                        </label>
+                        <label class="filtro-item">Hora desde
+                            <input id="filtro-hora-desde" type="time" class="input-dark">
+                        </label>
+                        <label class="filtro-item">Hora hasta
+                            <input id="filtro-hora-hasta" type="time" class="input-dark">
+                        </label>
+                        <label class="filtro-item">Estudiante
+                            <input id="filtro-texto" type="text" class="input-dark" maxlength="50"
+                                placeholder="Nombre, carrera o tag">
+                        </label>
+                        <label class="filtro-item">Movimiento
+                            <select id="filtro-estado" class="input-dark">
+                                <option value="">Todos</option>
+                                <option value="INGRESO">Ingresos</option>
+                                <option value="SALIDA">Salidas</option>
+                                <option value="DENEGADO">Denegados</option>
+                            </select>
+                        </label>
+                        <div class="filtros-acciones">
+                            <button type="submit" class="btn-neon btn-sm">Buscar</button>
+                            <button type="button" class="btn-neon btn-sm btn-danger-outline" onclick="limpiarFiltros()">Hoy</button>
+                        </div>
+                    </form>
+                </article>
+
                 <div class="cyber-table-container">
                     <div class="table-header">
-                        <h3>Historial de Sesion</h3>
+                        <h3>Historial de Ingresos y Salidas</h3>
+                        <span class="table-count" id="historial-count">0 registros</span>
                     </div>
                     <div class="table-scroll">
-                        <table aria-label="Historial completo de ingresos de la sesion">
+                        <table aria-label="Historial filtrado de ingresos y salidas">
                             <thead>
                                 <tr>
+                                    <th scope="col">Fecha</th>
                                     <th scope="col">Hora</th>
+                                    <th scope="col">Estudiante</th>
                                     <th scope="col">ID (Protegido)</th>
                                     <th scope="col">Tag RFID</th>
                                     <th scope="col">Estado</th>
@@ -531,7 +569,30 @@
                                 <line x1="9" y1="13" x2="15" y2="13" />
                                 <line x1="9" y1="17" x2="13" y2="17" />
                             </svg>
-                            <span>Sin datos de sesion aun. Registre ingresos desde Monitoreo.</span>
+                            <span>No hay registros para los filtros elegidos.</span>
+                        </p>
+                    </div>
+                </div>
+
+                <div class="cyber-table-container" style="margin-top: 20px;">
+                    <div class="table-header">
+                        <h3>Dentro de la institucion (sin salida registrada)</h3>
+                        <span class="table-count" id="dentro-count">0 estudiantes</span>
+                    </div>
+                    <div class="table-scroll">
+                        <table aria-label="Estudiantes dentro de la institucion">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Estudiante</th>
+                                    <th scope="col">Carrera</th>
+                                    <th scope="col">ID (Protegido)</th>
+                                    <th scope="col">Ultimo ingreso</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabla-dentro"></tbody>
+                        </table>
+                        <p id="sin-dentro" class="empty-state" role="status">
+                            <span>Nadie dentro en este momento.</span>
                         </p>
                     </div>
                 </div>
@@ -654,6 +715,14 @@
                                 onclick="guardarPuerto()">Aplicar</button>
                         </div>
                     </div>
+                    <div class="config-divider solo-admin"></div>
+                    <div class="config-row solo-admin">
+                        <span class="config-label">Retencion de datos (Ley 1581): borrar registros de acceso antiguos</span>
+                        <div class="config-controls">
+                            <button id="btn-purgar" class="btn-neon btn-sm btn-danger-outline"
+                                onclick="purgarRegistrosAntiguos()">Purgar</button>
+                        </div>
+                    </div>
                 </article>
 
                 <article class="cyber-card about-card" style="margin-top: 20px;">
@@ -721,7 +790,7 @@
                             <rect x="2" y="2" width="20" height="20" rx="2" />
                             <path d="M7 11l3 3 7-7" />
                         </svg>
-                        <input id="modal-tag" type="text" class="input-dark" placeholder="FET-D3391" required
+                        <input id="modal-tag" type="text" class="input-dark" placeholder="Ej: A3F2C1D4" required
                             autocomplete="off" style="font-family: 'JetBrains Mono', monospace; letter-spacing:1px;">
                     </div>
                 </div>

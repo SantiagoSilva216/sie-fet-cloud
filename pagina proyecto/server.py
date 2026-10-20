@@ -43,6 +43,12 @@ BLOQUEO_INTENTOS = int(os.getenv('BLOQUEO_INTENTOS', '5'))
 BLOQUEO_MINUTOS = int(os.getenv('BLOQUEO_MINUTOS', '15'))
 RETENCION_DIAS = int(os.getenv('RETENCION_DIAS', '365'))
 ROL_ADMIN = 'Administrador'
+# Nombres de rol que cuentan como administrador (sin importar mayúsculas ni espacios)
+ROLES_ADMIN = {'administrador', 'administradora', 'admin', 'administrator', 'superadmin'}
+ 
+ 
+def es_admin(rol):
+    return str(rol or '').strip().lower() in ROLES_ADMIN
  
 serializer = URLSafeTimedSerializer(SECRET_KEY, salt='sie-fet-auth')
  
@@ -146,7 +152,7 @@ def requiere_auth(solo_admin=False):
             except BadSignature:
                 return jsonify({'error': 'Token inválido'}), 401
             g.usuario, g.rol = datos['u'], datos['r']
-            if solo_admin and g.rol != ROL_ADMIN:
+            if solo_admin and not es_admin(g.rol):
                 auditar(g.usuario, 'ACCESO_NO_PERMITIDO', f'{request.method} {request.path}')
                 return jsonify({'error': 'Permisos insuficientes'}), 403
             return f(*args, **kwargs)

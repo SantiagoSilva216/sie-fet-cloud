@@ -377,15 +377,16 @@
 }
 
 [data-theme="light"] .btn-danger-outline {
-    border-color: rgba(26, 46, 26, 0.20);
-    color: rgba(26, 46, 26, 0.55);
+    background: linear-gradient(135deg, var(--green-700), var(--green-800));
+    border-color: var(--green-800);
+    color: #ffffff;
 }
 
 [data-theme="light"] .btn-danger-outline:hover {
-    background: rgba(26, 46, 26, 0.05);
-    border-color: rgba(26, 46, 26, 0.40);
-    color: var(--text-main);
-    box-shadow: none;
+    background: linear-gradient(135deg, var(--green-600), var(--green-700));
+    border-color: var(--green-700);
+    color: #ffffff;
+    box-shadow: 0 4px 16px rgba(46, 139, 46, 0.30);
 }
 
 [data-theme="light"] .btn-config {
@@ -914,11 +915,23 @@ code {
     box-shadow: none;
 }
 
-/* Acción de limpieza — borde blanco, sin rojo */
+/* Acción de limpieza — borde blanco, sin rojo; texto con alto contraste para leerse a distancia */
 .btn-danger-outline {
-    border-color: var(--white-20);
-    color: var(--white-50);
+    border-color: var(--white-50);
+    color: var(--white);
     background: transparent;
+}
+
+#btn-limpiar {
+    font-size: .95rem;
+    font-weight: 800;
+    padding: 11px 22px;
+    letter-spacing: 1.5px;
+}
+
+#btn-limpiar svg {
+    width: 17px;
+    height: 17px;
 }
 
 .btn-danger-outline:hover {

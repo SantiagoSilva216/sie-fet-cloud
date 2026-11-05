@@ -7,8 +7,8 @@
     <meta name="referrer" content="no-referrer">
     <title>FET | Sistema de Ingreso Estudiantil RFID</title>
     <meta name="description"
-        content="Sistema de Identificación Estudiantil FET con tecnología RFID para control de acceso y aforo en tiempo real. Fundación Escuela Tecnológica de Neiva.">
-    <meta name="author" content="Ordoñez, Cardozo, Serrato - FET Ingeniería de Software">
+        content="Sistema de Ingreso Estudiantil FET con tecnología RFID para control de acceso y aforo en tiempo real. Fundación Escuela Tecnológica de Neiva.">
+    <meta name="author" content="Ordoñez, Cardoso, Serrato - FET Ingeniería de Software">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
@@ -20,7 +20,7 @@
 <body>
 
     <!-- =================== PANTALLA DE LOGIN =================== -->
-    <div id="login-screen" role="main" aria-label="Pantalla de inicio de sesion">
+    <div id="login-screen" role="main" aria-label="Pantalla de inicio de sesión">
         <div class="login-particles" id="login-particles"></div>
         <div class="login-box" aria-labelledby="login-title">
             <div class="login-logo">
@@ -34,7 +34,7 @@
                 </div>
             </div>
             <h1 id="login-title">S.I.E &mdash; FET</h1>
-            <p class="login-subtitle">Sistema de Ingreso Estudiantil &middot; Tecnologia RFID</p>
+            <p class="login-subtitle">Sistema de Ingreso Estudiantil &middot; Tecnología RFID</p>
             <div class="login-divider"></div>
             <form id="form-login" onsubmit="entrarSistema(event)" novalidate>
                 <div class="input-group">
@@ -63,7 +63,7 @@
                     </div>
                 </div>
                 <button id="btn-login" type="submit" class="btn-neon btn-login-main">
-                    <span class="btn-text">Iniciar Sesion</span>
+                    <span class="btn-text">Iniciar Sesión</span>
                     <span class="btn-loader" aria-hidden="true"></span>
                 </button>
                 <p class="login-hint">Acceso exclusivo para personal autorizado</p>
@@ -96,7 +96,7 @@
         <div id="sidebar-overlay" class="sidebar-overlay" onclick="cerrarSidebar()" aria-hidden="true"></div>
 
         <!-- SIDEBAR -->
-        <nav class="sidebar" id="sidebar" aria-label="Navegacion principal">
+        <nav class="sidebar" id="sidebar" aria-label="Navegación principal">
             <div class="brand">
                 <!-- Botón cerrar sidebar en móvil -->
                 <button id="btn-close-sidebar" class="btn-sidebar-close" onclick="cerrarSidebar()"
@@ -119,7 +119,7 @@
                     <h2>FET RFID</h2>
                     <span class="brand-status">
                         <span class="pulse-dot" aria-hidden="true"></span>
-                        Sistema en Linea
+                        <span id="brand-status-text">Sistema en Línea</span>
                     </span>
                 </div>
             </div>
@@ -165,7 +165,7 @@
                     <path
                         d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                 </svg>
-                <span>Configuracion</span>
+                <span>Configuración</span>
             </button>
 
             <div class="sidebar-spacer"></div>
@@ -198,7 +198,7 @@
                 <div class="user-avatar" aria-hidden="true">A</div>
                 <div class="user-info">
                     <span class="user-name" id="sidebar-username">Administrador</span>
-                    <span class="user-role">Guardia de Seguridad</span>
+                    <span class="user-role">Personal de Seguridad</span>
                 </div>
             </div>
 
@@ -230,9 +230,9 @@
                             </svg>
                         </button>
                         <h2>Terminal Central FET</h2>
-                        <p class="header-sub" id="estado-puerto">
+                        <p class="header-sub" id="estado-puerto" role="status">
                             <span class="dot-live" aria-hidden="true"></span>
-                            Escuchando puerto COM3...
+                            Conectando con el servidor...
                         </p>
                     </div>
                     <div class="header-actions">
@@ -249,7 +249,17 @@
                     </div>
                 </div>
 
-                <div class="grid-3" role="region" aria-label="Metricas en vivo">
+                <article class="cyber-card ultima-lectura" id="ultima-lectura" aria-live="polite"
+                    aria-label="Última lectura del lector RFID">
+                    <div class="ul-estado ul-espera" id="ul-estado">EN ESPERA</div>
+                    <div class="ul-info">
+                        <span class="ul-nombre" id="ul-nombre">Esperando la próxima lectura</span>
+                        <span class="ul-detalle" id="ul-detalle">Acerque una tarjeta al lector ESP32</span>
+                    </div>
+                    <div class="ul-latencia" id="ul-latencia" title="Tiempo desde que el servidor recibió la lectura hasta que apareció en esta pantalla"></div>
+                </article>
+
+                <div class="grid-3" role="region" aria-label="Métricas en vivo">
                     <article class="cyber-card card-aforo" aria-label="Aforo actual">
                         <div class="card-icon-wrap aforo-icon">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -266,7 +276,7 @@
                             <div class="aforo-bar-wrap" aria-label="Capacidad utilizada">
                                 <div class="aforo-bar" id="aforo-bar"></div>
                             </div>
-                            <p class="card-sub">de <span id="aforo-max-label">150</span> max.</p>
+                            <p class="card-sub">de <span id="aforo-max-label">150</span> máx.</p>
                         </div>
                     </article>
 
@@ -299,7 +309,7 @@
                         <div class="card-body">
                             <h3>Alertas</h3>
                             <div class="value number-font" id="alertas" aria-live="polite">0</div>
-                            <p class="card-sub card-sub-danger">Incidencias</p>
+                            <p class="card-sub card-sub-danger">Accesos denegados</p>
                         </div>
                     </article>
                 </div>
@@ -329,7 +339,7 @@
                                 height="40" aria-hidden="true">
                                 <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                             </svg>
-                            <span>Sin registros aun. Esperando lectura RFID...</span>
+                            <span>Sin registros aún. Esperando lectura RFID...</span>
                         </p>
                     </div>
                 </div>
@@ -348,7 +358,7 @@
                                 <line x1="3" y1="18" x2="21" y2="18" />
                             </svg>
                         </button>
-                        <h2>Gestion de Credenciales</h2>
+                        <h2>Gestión de Credenciales</h2>
                         <p class="header-sub">Base de datos de tarjetas RFID asignadas</p>
                     </div>
                     <button id="btn-asignar" class="btn-neon btn-sm solo-admin" onclick="abrirModalAsignar()">
@@ -393,7 +403,7 @@
                                 <circle cx="9" cy="7" r="4" />
                                 <line x1="23" y1="11" x2="17" y2="11" />
                             </svg>
-                            <span>Sin estudiantes registrados aun. Asigne la primera tarjeta.</span>
+                            <span>Sin estudiantes registrados aún. Asigne la primera tarjeta.</span>
                         </p>
                     </div>
                 </div>
@@ -412,7 +422,7 @@
                                 <line x1="3" y1="18" x2="21" y2="18" />
                             </svg>
                         </button>
-                        <h2>Analisis y Reportes</h2>
+                        <h2>Análisis y Reportes</h2>
                         <p class="header-sub">Historial filtrable por fecha, hora y estudiante</p>
                     </div>
                     <button id="btn-exportar" class="btn-neon btn-sm" onclick="exportarReporte()">
@@ -426,7 +436,7 @@
                     </button>
                 </div>
 
-                <div class="grid-3" style="margin-bottom: 28px;" role="region" aria-label="Resumen del dia">
+                <div class="grid-3" style="margin-bottom: 28px;" role="region" aria-label="Resumen del día">
                     <article class="cyber-card" aria-label="Total de ingresos hoy">
                         <div class="card-icon-wrap ingreso-icon"><svg viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -451,7 +461,7 @@
                             <div class="value number-font" id="reporte-alertas" aria-live="polite">0</div>
                         </div>
                     </article>
-                    <article class="cyber-card" aria-label="Aforo maximo configurado">
+                    <article class="cyber-card" aria-label="Aforo máximo configurado">
                         <div class="card-icon-wrap aforo-icon"><svg viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <line x1="12" y1="2" x2="12" y2="6" />
@@ -462,49 +472,49 @@
                                 <line x1="18" y1="12" x2="22" y2="12" />
                             </svg></div>
                         <div class="card-body">
-                            <h3>Aforo Maximo</h3>
+                            <h3>Aforo Máximo</h3>
                             <div class="value number-font" id="reporte-maximo" aria-live="polite">150</div>
                         </div>
                     </article>
                 </div>
 
                 <article class="cyber-card latencia-card" style="margin-bottom: 28px;"
-                    aria-label="Comparacion de latencia de ingreso">
-                    <h3 style="margin-bottom: 20px;">
+                    aria-label="Prueba de rendimiento: latencia de lectura">
+                    <h3 style="margin-bottom: 6px;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16"
                             height="16" style="vertical-align:middle; margin-right:6px;" aria-hidden="true">
                             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
                         </svg>
-                        Latencia de Ingreso por Persona
+                        Prueba de rendimiento: lectura &rarr; pantalla
                     </h3>
-                    <p style="margin:-12px 0 16px;font-size:.78rem;color:var(--text-muted);">Valores de referencia del equipo (meta del sistema); requieren confirmacion con pruebas de rendimiento.</p>
-                    <div class="latencia-row">
-                        <div class="latencia-item">
-                            <span class="latencia-label danger-text">Manual (Bitacora)</span>
-                            <span class="latencia-value number-font danger-text">12.5 s</span>
-                        </div>
-                        <div class="vs-badge" aria-hidden="true">VS</div>
-                        <div class="latencia-item">
-                            <span class="latencia-label success-text">Automatico RFID</span>
-                            <span class="latencia-value number-font success-text">0.8 s</span>
-                        </div>
-                        <div class="mejora-badge" aria-label="Mejora del 93.6%">
-                            <span>&#8595; 93.6%</span>
-                        </div>
+                    <p class="latencia-nota">Se mide automáticamente cada lectura nueva que llega mientras este panel está
+                        abierto: desde que el servidor recibe la lectura del ESP32 hasta que aparece en Monitoreo en Vivo.
+                        Meta del proyecto (RNF01): menos de 1 segundo.</p>
+                    <div class="perf-grid">
+                        <div class="perf-item"><span class="perf-label">Lecturas medidas</span><span class="perf-valor number-font" id="perf-n">0</span></div>
+                        <div class="perf-item"><span class="perf-label">Promedio</span><span class="perf-valor number-font" id="perf-prom">&mdash;</span></div>
+                        <div class="perf-item"><span class="perf-label">Mínimo</span><span class="perf-valor number-font" id="perf-min">&mdash;</span></div>
+                        <div class="perf-item"><span class="perf-label">Máximo</span><span class="perf-valor number-font" id="perf-max">&mdash;</span></div>
+                        <div class="perf-item"><span class="perf-label">Bajo 1 s</span><span class="perf-valor number-font" id="perf-meta">&mdash;</span></div>
                     </div>
-                    <div class="barra-comparacion" role="img" aria-label="Grafico comparativo de tiempos">
+                    <div class="barra-comparacion" role="img" id="perf-barras"
+                        aria-label="Comparación del registro manual de referencia con el promedio medido">
                         <div class="barra-row">
-                            <span class="barra-label">Manual (12.5s)</span>
+                            <span class="barra-label">Manual, ref. (12,5 s)</span>
                             <div class="barra-fondo">
                                 <div class="barra-fill barra-danger" style="width:100%"></div>
                             </div>
                         </div>
                         <div class="barra-row">
-                            <span class="barra-label success-text">RFID &nbsp;(0.8s)</span>
+                            <span class="barra-label success-text" id="perf-barra-label">RFID medido (sin datos)</span>
                             <div class="barra-fondo">
-                                <div class="barra-fill barra-ok" style="width:6.4%"></div>
+                                <div class="barra-fill barra-ok" id="perf-barra" style="width:0%"></div>
                             </div>
                         </div>
+                    </div>
+                    <div class="perf-acciones">
+                        <button type="button" class="btn-neon btn-sm" onclick="exportarMediciones()">Exportar mediciones CSV</button>
+                        <button type="button" class="btn-neon btn-sm btn-danger-outline" onclick="reiniciarMediciones()">Reiniciar prueba</button>
                     </div>
                 </article>
 
@@ -576,17 +586,17 @@
 
                 <div class="cyber-table-container" style="margin-top: 20px;">
                     <div class="table-header">
-                        <h3>Dentro de la institucion (sin salida registrada)</h3>
+                        <h3>Dentro de la institución (sin salida registrada)</h3>
                         <span class="table-count" id="dentro-count">0 estudiantes</span>
                     </div>
                     <div class="table-scroll">
-                        <table aria-label="Estudiantes dentro de la institucion">
+                        <table aria-label="Estudiantes dentro de la institución">
                             <thead>
                                 <tr>
                                     <th scope="col">Estudiante</th>
                                     <th scope="col">Carrera</th>
                                     <th scope="col">ID (Protegido)</th>
-                                    <th scope="col">Ultimo ingreso</th>
+                                    <th scope="col">Último ingreso</th>
                                 </tr>
                             </thead>
                             <tbody id="tabla-dentro"></tbody>
@@ -599,7 +609,7 @@
             </section>
 
             <!-- VISTA 4: CONFIGURACION -->
-            <section id="vista-configuracion" class="view-section" aria-label="Configuracion del Sistema">
+            <section id="vista-configuracion" class="view-section" aria-label="Configuración del Sistema">
                 <div class="top-header">
                     <div class="header-left">
                         <button id="btn-hamburger-configuracion" class="btn-hamburger" onclick="abrirSidebar()"
@@ -611,13 +621,36 @@
                                 <line x1="3" y1="18" x2="21" y2="18" />
                             </svg>
                         </button>
-                        <h2>Parametros del Sistema</h2>
-                        <p class="header-sub">Configuracion de hardware, aforo y licencia</p>
+                        <h2>Parámetros del Sistema</h2>
+                        <p class="header-sub">Estado real de los servicios, aforo, retención de datos y licencia</p>
                     </div>
                 </div>
 
                 <div class="grid-3" style="margin-bottom: 28px;" role="region" aria-label="Estado de servicios">
-                    <article class="cyber-card service-card" id="card-mysql" aria-label="Estado MySQL">
+                    <article class="cyber-card service-card" id="card-servidor" aria-label="Estado del servidor">
+                        <div class="service-header">
+                            <div class="service-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="2" y="3" width="20" height="7" rx="2" />
+                                    <rect x="2" y="14" width="20" height="7" rx="2" />
+                                    <line x1="6" y1="6.5" x2="6.01" y2="6.5" />
+                                    <line x1="6" y1="17.5" x2="6.01" y2="17.5" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3>Servidor</h3>
+                                <span class="service-tech">Flask (Python) en Render</span>
+                            </div>
+                        </div>
+                        <div class="service-status">
+                            <span class="pulse-dot" aria-hidden="true"></span>
+                            <span id="estado-servidor" class="status-text-err">Sin comprobar</span>
+                        </div>
+                        <p class="service-detalle" id="detalle-servidor">&nbsp;</p>
+                        <button class="btn-config" onclick="comprobarEstado(true)">Comprobar ahora</button>
+                    </article>
+
+                    <article class="cyber-card service-card" id="card-bd" aria-label="Estado de la base de datos">
                         <div class="service-header">
                             <div class="service-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -628,55 +661,36 @@
                             </div>
                             <div>
                                 <h3>Base de Datos</h3>
-                                <span class="service-tech">MySQL 8.0</span>
+                                <span class="service-tech">TiDB Cloud (compatible con MySQL)</span>
                             </div>
                         </div>
                         <div class="service-status">
                             <span class="pulse-dot" aria-hidden="true"></span>
-                            <span id="estado-mysql" class="status-text-ok">Conectado</span>
+                            <span id="estado-bd" class="status-text-err">Sin comprobar</span>
                         </div>
-                        <button id="btn-reconectar-mysql" class="btn-config"
-                            onclick="reconectarServicio('mysql')">Reconectar</button>
+                        <p class="service-detalle" id="detalle-bd">&nbsp;</p>
                     </article>
 
-                    <article class="cyber-card service-card" id="card-python" aria-label="Estado Python">
+                    <article class="cyber-card service-card" id="card-lector" aria-label="Estado del lector RFID">
                         <div class="service-header">
                             <div class="service-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path
-                                        d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93V18h2v1.93c-3.94-.49-7-3.85-7-7.93h2c0 3.31 2.69 6 6 6z" />
+                                    <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+                                    <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+                                    <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+                                    <line x1="12" y1="20" x2="12.01" y2="20" />
                                 </svg>
                             </div>
                             <div>
-                                <h3>Script RFID</h3>
-                                <span class="service-tech">Python 3.x &middot; pyserial</span>
+                                <h3>Lector RFID</h3>
+                                <span class="service-tech">ESP32 + RC522 por WiFi</span>
                             </div>
                         </div>
                         <div class="service-status">
                             <span class="pulse-dot" aria-hidden="true"></span>
-                            <span id="estado-python" class="status-text-ok">En Ejecucion</span>
+                            <span id="estado-lector" class="status-text-err">Sin comprobar</span>
                         </div>
-                        <button id="btn-reiniciar-python" class="btn-config"
-                            onclick="reconectarServicio('python')">Reiniciar</button>
-                    </article>
-
-                    <article class="cyber-card service-card" aria-label="Informacion de licencia">
-                        <div class="service-header">
-                            <div class="service-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                                </svg>
-                            </div>
-                            <div>
-                                <h3>Licencia</h3>
-                                <span class="service-tech">Privativa FET 2024</span>
-                            </div>
-                        </div>
-                        <div class="service-status">
-                            <span class="pulse-dot" aria-hidden="true"></span>
-                            <span class="status-text-ok">Activa</span>
-                        </div>
-                        <button id="btn-ver-licencia" class="btn-config" onclick="verLicencia()">Ver Licencia</button>
+                        <p class="service-detalle" id="detalle-lector">&nbsp;</p>
                     </article>
                 </div>
 
@@ -688,36 +702,27 @@
                             <path
                                 d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                         </svg>
-                        Parametros Operacionales
+                        Parámetros Operacionales
                     </h3>
                     <div class="config-row">
-                        <label for="input-aforo-max" class="config-label">Capacidad Maxima de Aforo</label>
+                        <label for="input-aforo-max" class="config-label">Capacidad máxima de aforo (se guarda en este navegador)</label>
                         <div class="config-controls">
                             <input id="input-aforo-max" type="number" class="input-dark input-small" value="150" min="1"
-                                max="9999" aria-label="Capacidad maxima de aforo">
+                                max="9999" aria-label="Capacidad máxima de aforo">
                             <button id="btn-guardar-aforo" class="btn-neon btn-sm"
                                 onclick="guardarAforo()">Guardar</button>
                         </div>
                     </div>
                     <div class="config-divider"></div>
                     <div class="config-row">
-                        <label for="select-puerto" class="config-label">Puerto COM del Lector RFID</label>
+                        <span class="config-label">Licencia del software</span>
                         <div class="config-controls">
-                            <select id="select-puerto" class="input-dark input-small"
-                                aria-label="Puerto COM del lector RFID">
-                                <option value="COM3">COM3</option>
-                                <option value="COM4">COM4</option>
-                                <option value="COM5">COM5</option>
-                                <option value="/dev/ttyUSB0">/dev/ttyUSB0</option>
-                                <option value="/dev/ttyUSB1">/dev/ttyUSB1</option>
-                            </select>
-                            <button id="btn-guardar-puerto" class="btn-neon btn-sm"
-                                onclick="guardarPuerto()">Aplicar</button>
+                            <button id="btn-ver-licencia" class="btn-neon btn-sm btn-danger-outline" onclick="verLicencia()">Ver licencia</button>
                         </div>
                     </div>
                     <div class="config-divider solo-admin"></div>
                     <div class="config-row solo-admin">
-                        <span class="config-label">Retencion de datos (Ley 1581): borrar registros de acceso antiguos</span>
+                        <span class="config-label">Retención de datos (Ley 1581): borrar registros de acceso más antiguos que <span id="retencion-dias">365</span> días</span>
                         <div class="config-controls">
                             <button id="btn-purgar" class="btn-neon btn-sm btn-danger-outline"
                                 onclick="purgarRegistrosAntiguos()">Purgar</button>
@@ -728,24 +733,28 @@
                 <article class="cyber-card about-card" style="margin-top: 20px;">
                     <h3 style="margin-bottom: 14px;">Acerca del Sistema</h3>
                     <div class="about-grid">
-                        <div class="about-item"><span class="about-label">Institucion</span><span
-                                class="about-value">FET &ndash; Fundacion Escuela Tecnologica de Neiva</span></div>
+                        <div class="about-item"><span class="about-label">Institución</span><span
+                                class="about-value">FET &ndash; Fundación Escuela Tecnológica de Neiva</span></div>
                         <div class="about-item"><span class="about-label">Autores</span><span
-                                class="about-value">Ordonez &middot; Cardoso &middot; Serrato</span></div>
-                        <div class="about-item"><span class="about-label">Tecnologia</span><span
-                                class="about-value">RFID Pasivo 125kHz / 13.56MHz</span></div>
+                                class="about-value">Ordoñez &middot; Cardoso &middot; Serrato</span></div>
+                        <div class="about-item"><span class="about-label">Lector</span><span
+                                class="about-value">ESP32 + RC522 (13,56 MHz) + LCD 16x2, envío por WiFi</span></div>
                         <div class="about-item"><span class="about-label">Backend</span><span class="about-value">Python
-                                (pyserial) + MySQL 8.0</span></div>
-                        <div class="about-item"><span class="about-label">Version</span><span class="about-value">1.0.0
+                                (Flask, API REST) en Render</span></div>
+                        <div class="about-item"><span class="about-label">Base de datos</span><span
+                                class="about-value">TiDB Cloud (compatible con MySQL)</span></div>
+                        <div class="about-item"><span class="about-label">Frontend</span><span
+                                class="about-value">HTML, CSS y JavaScript en Vercel</span></div>
+                        <div class="about-item"><span class="about-label">Versión</span><span class="about-value">1.1
                                 &mdash; 2026</span></div>
-                        <div class="about-item"><span class="about-label">Marco Legal</span><span
+                        <div class="about-item"><span class="about-label">Marco legal</span><span
                                 class="about-value">Ley 1581/2012 &ndash; Habeas Data</span></div>
                     </div>
                 </article>
             </section>
 
             <footer class="legal-footer">
-                Sistema Estudiantil FET &copy; 2026 &mdash; Ordonez, Cardoso &amp; Serrato &mdash; Licencia Privativa
+                Sistema de Ingreso Estudiantil FET &copy; 2026 &mdash; Ordoñez, Cardoso &amp; Serrato &mdash; Licencia privativa
             </footer>
         </main>
     </div>
@@ -764,7 +773,7 @@
                     <h3 id="modal-title">Asignar Nueva Tarjeta RFID</h3>
                 </div>
                 <button id="btn-cerrar-modal" class="modal-close" onclick="cerrarModalDirect()"
-                    aria-label="Cerrar modal">x</button>
+                    aria-label="Cerrar">&times;</button>
             </div>
             <form id="form-estudiante" onsubmit="guardarEstudiante(event)" novalidate>
                 <div class="input-group">
@@ -779,11 +788,11 @@
                 </div>
                 <div class="input-group">
                     <label for="modal-carrera">Carrera / Programa</label>
-                    <input id="modal-carrera" type="text" class="input-dark" placeholder="Ej: Ingenieria de Software"
+                    <input id="modal-carrera" type="text" class="input-dark" placeholder="Ej: Ingeniería de Software"
                         required autocomplete="off">
                 </div>
                 <div class="input-group">
-                    <label for="modal-tag">Codigo RFID Tag</label>
+                    <label for="modal-tag">Código RFID (tag)</label>
                     <div class="input-icon-wrap">
                         <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                             aria-hidden="true">
@@ -811,6 +820,77 @@
                     Guardar Registro
                 </button>
             </form>
+        </div>
+    </div>
+
+    <!-- =================== MODAL EDITAR ESTUDIANTE =================== -->
+    <div id="modal-editar" class="modal-overlay" onclick="if (event.target === this) cerrarModalEditar()" role="dialog"
+        aria-modal="true" aria-labelledby="modal-editar-title">
+        <div class="modal-box">
+            <div class="modal-header">
+                <div class="modal-title-wrap">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"
+                        aria-hidden="true">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                    </svg>
+                    <h3 id="modal-editar-title">Editar datos del estudiante</h3>
+                </div>
+                <button class="modal-close" onclick="cerrarModalEditar()" aria-label="Cerrar">&times;</button>
+            </div>
+            <form id="form-editar" onsubmit="guardarEdicion(event)" novalidate>
+                <p class="modal-nota">Tarjeta <strong id="editar-tag-label" class="rfid-tag-inline"></strong>. Corrija solo lo que
+                    necesite (derecho de rectificación, Ley 1581).</p>
+                <div class="input-group">
+                    <label for="editar-nombre">Nombre completo</label>
+                    <input id="editar-nombre" type="text" class="input-dark" required autocomplete="off" maxlength="100">
+                </div>
+                <div class="input-group">
+                    <label for="editar-carrera">Carrera / Programa</label>
+                    <input id="editar-carrera" type="text" class="input-dark" required autocomplete="off" maxlength="100">
+                </div>
+                <div class="input-group">
+                    <label for="editar-documento">Documento de identidad nuevo</label>
+                    <input id="editar-documento" type="text" class="input-dark" autocomplete="off" maxlength="20"
+                        placeholder="Déjelo vacío para no cambiarlo"
+                        style="font-family: 'JetBrains Mono', monospace; letter-spacing:1px;">
+                    <small class="input-ayuda">Por privacidad no se muestra el documento actual.</small>
+                </div>
+                <div class="modal-acciones">
+                    <button type="button" class="btn-neon btn-danger-outline" onclick="cerrarModalEditar()">Cancelar</button>
+                    <button id="btn-guardar-edicion" type="submit" class="btn-neon">Guardar cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- =================== MODAL DE CONFIRMACION =================== -->
+    <div id="modal-confirmar" class="modal-overlay" role="alertdialog" aria-modal="true"
+        aria-labelledby="confirmar-titulo" aria-describedby="confirmar-mensaje">
+        <div class="modal-box modal-box-sm">
+            <div class="modal-header">
+                <div class="modal-title-wrap">
+                    <svg id="confirmar-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        width="18" height="18" aria-hidden="true">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                    <h3 id="confirmar-titulo">Confirmar</h3>
+                </div>
+            </div>
+            <div id="confirmar-mensaje" class="confirmar-mensaje"></div>
+            <div class="input-group" id="confirmar-clave-wrap" style="display:none;">
+                <label for="confirmar-clave" id="confirmar-clave-label"></label>
+                <input id="confirmar-clave" type="text" class="input-dark" autocomplete="off"
+                    oninput="validarClaveConfirmacion()">
+            </div>
+            <div class="modal-acciones">
+                <button type="button" id="confirmar-extra" class="btn-neon btn-sm" style="display:none;"></button>
+                <span class="modal-acciones-espacio"></span>
+                <button type="button" id="confirmar-cancelar" class="btn-neon btn-danger-outline">Cancelar</button>
+                <button type="button" id="confirmar-aceptar" class="btn-neon btn-peligro">Aceptar</button>
+            </div>
         </div>
     </div>
 
